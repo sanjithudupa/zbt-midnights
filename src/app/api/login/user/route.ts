@@ -11,11 +11,11 @@ export async function POST(request: Request) {
   const supabase = getServiceSupabase();
   const { data, error } = await supabase
     .from("users")
-    .select("id, is_active")
+    .select("id")
     .eq("id", userId)
     .single();
 
-  if (error || !data || !data.is_active) {
+  if (error || !data) {
     return NextResponse.json({ error: "Invalid user selection." }, { status: 401 });
   }
 

@@ -28,10 +28,10 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Week required." }, { status: 400 });
   }
 
-  const secret = process.env.IMG_BB_DELETE_URL_SECRET;
+  const secret = process.env.ADMIN_SETTINGS_SECRET;
   if (!secret) {
     return NextResponse.json(
-      { error: "Missing IMG_BB_DELETE_URL_SECRET." },
+      { error: "Missing ADMIN_SETTINGS_SECRET." },
       { status: 500 }
     );
   }

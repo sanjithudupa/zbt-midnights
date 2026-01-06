@@ -10,7 +10,7 @@ export async function GET() {
   const { data, error } = await supabase
     .from("week_templates")
     .select(
-      "id, name, is_active, week_template_days ( id, day_of_week, job_definition_id, sort_order )"
+      "id, name, week_template_days ( id, day_of_week, job_definition_id, sort_order )"
     )
     .order("name", { ascending: true });
 
@@ -37,7 +37,7 @@ export async function POST(request: Request) {
   const { data, error } = await supabase
     .from("week_templates")
     .insert({ name: name.trim() })
-    .select("id, name, is_active, created_at")
+    .select("id, name, created_at")
     .single();
 
   if (error) {

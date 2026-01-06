@@ -10,16 +10,12 @@ export async function PATCH(
   if (unauthorized) return unauthorized;
 
   const { id } = await params;
-  const { username, is_active } = await request.json();
+  const { username } = await request.json();
 
   const updates: Record<string, unknown> = {};
   if (typeof username === "string" && username.trim()) {
     updates.username = username.trim();
   }
-  if (typeof is_active === "boolean") {
-    updates.is_active = is_active;
-  }
-
   if (!Object.keys(updates).length) {
     return NextResponse.json({ error: "No changes provided." }, { status: 400 });
   }
@@ -29,7 +25,7 @@ export async function PATCH(
     .from("users")
     .update(updates)
     .eq("id", id)
-    .select("id, username, is_active, created_at")
+    .select("id, username, created_at")
     .single();
 
   if (error) {

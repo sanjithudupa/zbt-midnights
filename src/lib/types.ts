@@ -1,14 +1,12 @@
 export type User = {
   id: string;
   username: string;
-  is_active: boolean;
   created_at: string;
 };
 
 export type JobDefinition = {
   id: string;
   name: string;
-  is_active: boolean;
   created_at: string;
 };
 
@@ -22,7 +20,6 @@ export type JobRequirement = {
 export type WeekTemplate = {
   id: string;
   name: string;
-  is_active: boolean;
   created_at: string;
 };
 

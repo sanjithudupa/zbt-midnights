@@ -9,7 +9,7 @@ export async function GET() {
   const supabase = getServiceSupabase();
   const { data, error } = await supabase
     .from("users")
-    .select("id, username, is_active, created_at")
+    .select("id, username, created_at")
     .order("created_at", { ascending: false });
 
   if (error) {
@@ -32,7 +32,7 @@ export async function POST(request: Request) {
   const { data, error } = await supabase
     .from("users")
     .insert({ username: username.trim() })
-    .select("id, username, is_active, created_at")
+    .select("id, username, created_at")
     .single();
 
   if (error) {

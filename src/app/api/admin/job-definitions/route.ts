@@ -10,7 +10,7 @@ export async function GET() {
   const { data, error } = await supabase
     .from("job_definitions")
     .select(
-      "id, name, is_active, created_at, job_requirements ( id, position, description )"
+      "id, name, created_at, job_requirements ( id, position, description )"
     )
     .order("created_at", { ascending: false });
 
@@ -37,7 +37,7 @@ export async function POST(request: Request) {
   const { data, error } = await supabase
     .from("job_definitions")
     .insert({ name: name.trim() })
-    .select("id, name, is_active, created_at")
+    .select("id, name, created_at")
     .single();
 
   if (error) {

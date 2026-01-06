@@ -6,7 +6,6 @@ export async function GET() {
   const { data, error } = await supabase
     .from("users")
     .select("id, username")
-    .eq("is_active", true)
     .order("username");
 
   if (error) {

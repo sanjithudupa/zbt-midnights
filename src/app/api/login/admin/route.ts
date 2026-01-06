@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { setSessionCookie } from "@/lib/session";
+import { getAdminSetting } from "@/lib/adminSettings";
 
 export async function POST(request: Request) {
   const { password } = await request.json();
@@ -8,15 +9,21 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid password." }, { status: 400 });
   }
 
-  const hash = process.env.ADMIN_PASSWORD_HASH;
-  const plaintext = process.env.ADMIN_PASSWORD;
-
-  let isValid = false;
-  if (hash) {
-    isValid = await bcrypt.compare(password, hash);
-  } else if (plaintext) {
-    isValid = password === plaintext;
+  let hash: string | null = null;
+  try {
+    hash = await getAdminSetting("admin_password_hash");
+  } catch {
+    hash = null;
   }
+
+  if (!hash) {
+    return NextResponse.json(
+      { error: "Admin password not configured." },
+      { status: 500 }
+    );
+  }
+
+  const isValid = await bcrypt.compare(password, hash);
 
   if (!isValid) {
     return NextResponse.json({ error: "Incorrect admin password." }, { status: 401 });

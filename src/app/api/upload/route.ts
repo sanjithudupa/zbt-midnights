@@ -1,11 +1,17 @@
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/auth";
+import { getAdminSetting } from "@/lib/adminSettings";
 
 export async function POST(request: Request) {
   const unauthorized = await requireUser();
   if (unauthorized) return unauthorized;
 
-  const apiKey = process.env.IMG_BB_API_KEY;
+  let apiKey: string | null = null;
+  try {
+    apiKey = await getAdminSetting("imgbb_api_key");
+  } catch {
+    apiKey = null;
+  }
   if (!apiKey) {
     return NextResponse.json({ error: "Missing ImgBB key." }, { status: 500 });
   }

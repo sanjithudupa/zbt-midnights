@@ -110,7 +110,7 @@ export async function POST(request: Request) {
   }
 
   if (requirements.length > 0) {
-    const secret = process.env.IMG_BB_DELETE_URL_SECRET;
+    const secret = process.env.ADMIN_SETTINGS_SECRET;
     const photoRows = [];
 
     for (const requirement of requirements) {

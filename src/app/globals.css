@@ -146,6 +146,12 @@ button.primary:hover {
   border-color: var(--accent-strong);
 }
 
+button.danger {
+  background: var(--error);
+  color: #fff;
+  border-color: var(--error);
+}
+
 button.ghost,
 label.ghost {
   background: transparent;
@@ -207,6 +213,19 @@ button.icon {
 
 .block-gap {
   margin-bottom: 12px;
+}
+
+.section-gap {
+  margin-top: 16px;
+}
+
+.row-end {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.text-danger {
+  color: var(--error);
 }
 
 .grid-table {

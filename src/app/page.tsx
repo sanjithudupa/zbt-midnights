@@ -64,6 +64,10 @@ export default function HomePage() {
       setError("Please select a user.");
       return;
     }
+    if (selectedUser === "__admin__") {
+      setError("Enter the admin password.");
+      return;
+    }
     setLoading(true);
     const response = await fetch("/api/login/user", {
       method: "POST",
@@ -79,17 +83,33 @@ export default function HomePage() {
     router.push("/user");
   };
 
+  const isAdminSelected = selectedUser === "__admin__";
+
   return (
     <div className="page">
       <div className="panel">
         <h1>Midnights Job Tracker</h1>
-        <p className="muted">Choose your mode to continue.</p>
 
         {error && <div className="error-banner">{error}</div>}
 
-        <div className="grid-two">
-          <section className="card">
-            <h2>Admin Login</h2>
+        <section className="card">
+          <h2>Login</h2>
+          <label className="field">
+            <span>Select user</span>
+            <select
+              value={selectedUser}
+              onChange={(event) => setSelectedUser(event.target.value)}
+            >
+              <option value="">Choose...</option>
+              {users.map((user) => (
+                <option key={user.id} value={user.id}>
+                  {user.username}
+                </option>
+              ))}
+              <option value="__admin__">Admin</option>
+            </select>
+          </label>
+          {isAdminSelected && (
             <label className="field">
               <span>Admin password</span>
               <input
@@ -98,40 +118,19 @@ export default function HomePage() {
                 onChange={(event) => setAdminPassword(event.target.value)}
               />
             </label>
-            <button
-              className="primary"
-              onClick={handleAdminLogin}
-              disabled={loading || !adminPassword}
-            >
-              Enter Admin
-            </button>
-          </section>
-
-          <section className="card">
-            <h2>User Login</h2>
-            <label className="field">
-              <span>Select user</span>
-              <select
-                value={selectedUser}
-                onChange={(event) => setSelectedUser(event.target.value)}
-              >
-                <option value="">Choose...</option>
-                {users.map((user) => (
-                  <option key={user.id} value={user.id}>
-                    {user.username}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <button
-              className="primary"
-              onClick={handleUserLogin}
-              disabled={loading || !selectedUser}
-            >
-              Continue
-            </button>
-          </section>
-        </div>
+          )}
+          <button
+            className="primary"
+            onClick={isAdminSelected ? handleAdminLogin : handleUserLogin}
+            disabled={
+              loading ||
+              !selectedUser ||
+              (isAdminSelected && adminPassword.length === 0)
+            }
+          >
+            Continue
+          </button>
+        </section>
       </div>
     </div>
   );

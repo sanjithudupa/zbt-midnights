@@ -222,7 +222,7 @@ function JobDayGrid({ jobList, selections = {}, statusMap, renderCell }: JobDayG
 
 export default function AdminDashboard() {
   const router = useRouter();
-  const [tab, setTab] = useState<"overview" | "setup" | "jobs" | "users">(
+  const [tab, setTab] = useState<"overview" | "setup" | "jobs" | "users" | "settings">(
     "overview"
   );
   const [users, setUsers] = useState<User[]>([]);
@@ -256,6 +256,20 @@ export default function AdminDashboard() {
   const [createTemplateSelections, setCreateTemplateSelections] = useState<SelectionMap>({});
   const [cleanupSummary, setCleanupSummary] = useState<CleanupSummaryRow[]>([]);
   const [cleanupStatus, setCleanupStatus] = useState<string | null>(null);
+  const [settingsStatus, setSettingsStatus] = useState<string | null>(null);
+  const [settingsDraft, setSettingsDraft] = useState({
+    adminPassword: "",
+    imgbbApiKey: "",
+  });
+  const [settingsPromptOpen, setSettingsPromptOpen] = useState(false);
+  const [settingsMasterPassword, setSettingsMasterPassword] = useState("");
+
+  const changedSettingsCount = useMemo(() => {
+    let count = 0;
+    if (settingsDraft.adminPassword.trim()) count += 1;
+    if (settingsDraft.imgbbApiKey.trim()) count += 1;
+    return count;
+  }, [settingsDraft]);
 
   const [jobEditorOpen, setJobEditorOpen] = useState(false);
   const [editingJobId, setEditingJobId] = useState<string | null>(null);
@@ -269,7 +283,6 @@ export default function AdminDashboard() {
 
   const activeJobDefinitions = useMemo(() => {
     return jobDefinitions
-      .filter((job) => job.is_active)
       .slice()
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [jobDefinitions]);
@@ -309,6 +322,7 @@ export default function AdminDashboard() {
         loadJobDefinitions(),
         loadWeeks(),
         loadTemplates(),
+        loadSettingsFlags(),
       ]);
     };
     loadAll();
@@ -383,6 +397,12 @@ export default function AdminDashboard() {
     }
   };
 
+  const loadSettingsFlags = async () => {
+    const response = await fetch("/api/admin/settings");
+    if (!response.ok) return;
+    await response.json();
+  };
+
   const loadCleanupSummary = async () => {
     const response = await fetch("/api/admin/cleanup");
     if (response.ok) {
@@ -431,6 +451,17 @@ export default function AdminDashboard() {
     });
     if (response.ok) {
       loadUsers();
+    }
+  };
+
+  const handleDeleteJob = async (jobId: string) => {
+    const confirmed = window.confirm("Delete this job permanently?");
+    if (!confirmed) return;
+    const response = await fetch(`/api/admin/job-definitions/${jobId}`, {
+      method: "DELETE",
+    });
+    if (response.ok) {
+      loadJobDefinitions();
     }
   };
 
@@ -680,6 +711,48 @@ export default function AdminDashboard() {
     loadCleanupSummary();
   };
 
+  const handleDeleteWeek = async (weekId: string) => {
+    const confirmed = window.confirm("Delete this week and all submissions?");
+    if (!confirmed) return;
+    const response = await fetch(`/api/admin/weeks/${weekId}`, {
+      method: "DELETE",
+    });
+    if (response.ok) {
+      setSelectedWeekId("");
+      loadWeeks();
+    }
+  };
+
+  const handleSaveSettings = async () => {
+    setSettingsStatus(null);
+    setSettingsPromptOpen(true);
+  };
+
+  const handleConfirmSaveSettings = async () => {
+    if (changedSettingsCount === 0) {
+      setSettingsPromptOpen(false);
+      return;
+    }
+    const response = await fetch("/api/admin/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        adminPassword: settingsDraft.adminPassword.trim() || undefined,
+        imgbbApiKey: settingsDraft.imgbbApiKey.trim() || undefined,
+        masterPassword: settingsMasterPassword,
+      }),
+    });
+    if (!response.ok) {
+      setSettingsStatus("Failed to update settings.");
+      return;
+    }
+    setSettingsStatus("Settings updated.");
+    setSettingsDraft({ adminPassword: "", imgbbApiKey: "" });
+    setSettingsMasterPassword("");
+    setSettingsPromptOpen(false);
+    loadSettingsFlags();
+  };
+
   const handleOpenDetail = (
     day: number,
     jobId: string,
@@ -757,6 +830,12 @@ export default function AdminDashboard() {
         >
           Users
         </button>
+        <button
+          className={tab === "settings" ? "tab active" : "tab"}
+          onClick={() => setTab("settings")}
+        >
+          Settings
+        </button>
       </div>
 
       {tab === "overview" && (
@@ -823,25 +902,6 @@ export default function AdminDashboard() {
                 );
               }}
             />
-          )}
-          {selectedWeek && (
-            <div className="stack">
-              <strong>Cleanup</strong>
-              {cleanupStatus && <div className="muted">{cleanupStatus}</div>}
-              <div className="row">
-                <span>
-                  {selectedCleanup
-                    ? `${selectedCleanup.deleted_photos}/${selectedCleanup.total_photos} deleted`
-                    : "0/0 deleted"}
-                </span>
-                <button
-                  className="ghost"
-                  onClick={() => handleCleanupWeek(selectedWeek.id)}
-                >
-                  Delete ImgBB images
-                </button>
-              </div>
-            </div>
           )}
         </section>
       )}
@@ -935,6 +995,32 @@ export default function AdminDashboard() {
               <button className="primary" onClick={handleSaveWeekSchedule}>
                 Save Week Setup
               </button>
+
+              <div className="stack section-gap">
+                <strong>Cleanup</strong>
+                {cleanupStatus && <div className="muted">{cleanupStatus}</div>}
+                <div className="row">
+                  <span>
+                    {selectedCleanup
+                      ? `${selectedCleanup.deleted_photos}/${selectedCleanup.total_photos} deleted`
+                      : "0/0 deleted"}
+                  </span>
+                  <button
+                    className="ghost"
+                    onClick={() => handleCleanupWeek(selectedWeek.id)}
+                  >
+                    Delete ImgBB images
+                  </button>
+                </div>
+              </div>
+              <div className="row-end">
+                <button
+                  className="danger"
+                  onClick={() => handleDeleteWeek(selectedWeek.id)}
+                >
+                  Delete record of week
+                </button>
+              </div>
             </div>
           )}
         </section>
@@ -967,9 +1053,9 @@ export default function AdminDashboard() {
                 </button>
                 <button
                   className="icon"
-                  onClick={() => handleJobUpdate(job, { is_active: !job.is_active })}
+                  onClick={() => handleDeleteJob(job.id)}
                 >
-                  {job.is_active ? <IconTrash /> : <IconRestore />}
+                  <IconTrash />
                 </button>
               </div>
             ))}
@@ -1004,6 +1090,57 @@ export default function AdminDashboard() {
                 </button>
               </div>
             ))}
+          </div>
+        </section>
+      )}
+
+      {tab === "settings" && (
+        <section className="card">
+          <h2>Settings</h2>
+          <div className="text-danger">
+            Be careful changing these settings as they could lock you out.
+          </div>
+          {settingsStatus && <div className="muted">{settingsStatus}</div>}
+          <div className="stack">
+            <label className="field">
+              <span>
+                Admin password{settingsDraft.adminPassword.trim() ? " *" : ""}
+              </span>
+              <input
+                type="password"
+                placeholder="Update admin password"
+                value={settingsDraft.adminPassword}
+                onChange={(event) =>
+                  setSettingsDraft((prev) => ({
+                    ...prev,
+                    adminPassword: event.target.value,
+                  }))
+                }
+              />
+            </label>
+            <label className="field">
+              <span>
+                ImgBB API key{settingsDraft.imgbbApiKey.trim() ? " *" : ""}
+              </span>
+              <input
+                type="password"
+                placeholder="Update ImgBB API key"
+                value={settingsDraft.imgbbApiKey}
+                onChange={(event) =>
+                  setSettingsDraft((prev) => ({
+                    ...prev,
+                    imgbbApiKey: event.target.value,
+                  }))
+                }
+              />
+            </label>
+            <button
+              className="primary"
+              onClick={handleSaveSettings}
+              disabled={changedSettingsCount === 0}
+            >
+              Update {changedSettingsCount} Settings
+            </button>
           </div>
         </section>
       )}
@@ -1329,6 +1466,30 @@ export default function AdminDashboard() {
                 {">"}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {settingsPromptOpen && (
+        <div className="modal">
+          <div className="modal-card">
+            <div className="modal-header">
+              <h3>Confirm Update</h3>
+              <button className="icon" onClick={() => setSettingsPromptOpen(false)}>
+                x
+              </button>
+            </div>
+            <label className="field">
+              <span>Master password</span>
+              <input
+                type="password"
+                value={settingsMasterPassword}
+                onChange={(event) => setSettingsMasterPassword(event.target.value)}
+              />
+            </label>
+            <button className="primary" onClick={handleConfirmSaveSettings}>
+              Confirm Update
+            </button>
           </div>
         </div>
       )}
