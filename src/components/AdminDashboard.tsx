@@ -1423,17 +1423,17 @@ export default function AdminDashboard() {
                 x
               </button>
             </div>
-            {photoViewer.photos[photoViewer.index]?.url ? (
-              <img
-                src={photoViewer.photos[photoViewer.index].url ?? ""}
-                alt={photoViewer.photos[photoViewer.index].description}
-              />
-            ) : (
-              <div className="muted">No photo available.</div>
-            )}
-            <div className="row">
+            <div className="viewer-body">
+              {photoViewer.photos[photoViewer.index]?.url ? (
+                <img
+                  src={photoViewer.photos[photoViewer.index].url ?? ""}
+                  alt={photoViewer.photos[photoViewer.index].description}
+                />
+              ) : (
+                <div className="muted">No photo available.</div>
+              )}
               <button
-                className="ghost"
+                className="viewer-nav left"
                 onClick={() =>
                   setPhotoViewer((prev) =>
                     prev
@@ -1449,9 +1449,8 @@ export default function AdminDashboard() {
               >
                 {"<"}
               </button>
-              <span>{photoViewer.photos[photoViewer.index].description}</span>
               <button
-                className="ghost"
+                className="viewer-nav right"
                 onClick={() =>
                   setPhotoViewer((prev) =>
                     prev
@@ -1466,6 +1465,7 @@ export default function AdminDashboard() {
                 {">"}
               </button>
             </div>
+            <div>{photoViewer.photos[photoViewer.index].description}</div>
           </div>
         </div>
       )}

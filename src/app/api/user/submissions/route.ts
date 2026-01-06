@@ -44,7 +44,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const { scheduledJobId, note, photos } = await request.json();
+  const { scheduledJobId, photos, skipRemaining } = await request.json();
   if (typeof scheduledJobId !== "string") {
     return NextResponse.json({ error: "Missing scheduled job." }, { status: 400 });
   }
@@ -70,21 +70,46 @@ export async function POST(request: Request) {
       ?.slice()
       .sort((a, b) => a.position - b.position) ?? [];
 
-  if (requirements.length !== photos.length) {
+  const allowPartial = Boolean(skipRemaining);
+
+  if (!allowPartial && requirements.length !== photos.length) {
     return NextResponse.json(
       { error: "All required photos must be uploaded." },
       { status: 400 }
     );
   }
 
-  for (let i = 0; i < requirements.length; i += 1) {
-    if (photos[i]?.position !== requirements[i].position) {
+  if (allowPartial && photos.length === 0 && requirements.length > 0) {
+    return NextResponse.json(
+      { error: "At least one photo is required." },
+      { status: 400 }
+    );
+  }
+
+  if (photos.length > requirements.length) {
+    return NextResponse.json(
+      { error: "Too many photos provided." },
+      { status: 400 }
+    );
+  }
+
+  const requirementMap = new Map(
+    requirements.map((req) => [req.position, req.description])
+  );
+  const seenPositions = new Set<number>();
+
+  for (const photo of photos) {
+    if (!requirementMap.has(photo?.position)) {
       return NextResponse.json(
         { error: "Photo order does not match requirements." },
         { status: 400 }
       );
     }
-    if (typeof photos[i]?.url !== "string" || photos[i].url.length === 0) {
+    if (seenPositions.has(photo.position)) {
+      return NextResponse.json({ error: "Duplicate photo position." }, { status: 400 });
+    }
+    seenPositions.add(photo.position);
+    if (typeof photo?.url !== "string" || photo.url.length === 0) {
       return NextResponse.json({ error: "Missing photo URL." }, { status: 400 });
     }
   }
@@ -94,7 +119,6 @@ export async function POST(request: Request) {
     .insert({
       scheduled_job_id: scheduledJobId,
       user_id: session.userId,
-      note: typeof note === "string" ? note : null,
     })
     .select("id")
     .single();
@@ -109,27 +133,25 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Failed to submit." }, { status: 500 });
   }
 
-  if (requirements.length > 0) {
+  if (requirements.length > 0 && photos.length > 0) {
     const secret = process.env.ADMIN_SETTINGS_SECRET;
     const photoRows = [];
 
-    for (const requirement of requirements) {
-      const match = photos.find(
-        (photo: { position: number }) => photo.position === requirement.position
-      );
+    for (const photo of photos) {
+      const description = requirementMap.get(photo.position) ?? "";
       let encryptedDeleteUrl: string | null = null;
-      if (secret && typeof match?.deleteUrl === "string" && match.deleteUrl) {
+      if (secret && typeof photo?.deleteUrl === "string" && photo.deleteUrl) {
         const { data: encrypted } = await supabase.rpc("encrypt_delete_url", {
-          plain_text: match.deleteUrl,
+          plain_text: photo.deleteUrl,
           secret_text: secret,
         });
         encryptedDeleteUrl = encrypted ?? null;
       }
       photoRows.push({
         submission_id: submission.id,
-        position: requirement.position,
-        requirement_description_snapshot: requirement.description,
-        imgbb_url: match?.url ?? "",
+        position: photo.position,
+        requirement_description_snapshot: description,
+        imgbb_url: photo?.url ?? "",
         imgbb_delete_url_encrypted: encryptedDeleteUrl,
       });
     }
