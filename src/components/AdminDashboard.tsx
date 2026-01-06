@@ -45,12 +45,14 @@ type WeekStatusRow = {
   }>;
 };
 
+type SubmissionItem = NonNullable<WeekStatusRow["job_submissions"]>[number];
+
 type SelectionMap = Record<string, boolean>;
 
 type DetailModal = {
   jobName: string;
   dayLabel: string;
-  submission: WeekStatusRow["job_submissions"][number] | null;
+  submission: SubmissionItem | null;
   photos: Array<{ description: string; url: string | null }>;
   late: boolean;
 };
@@ -153,7 +155,7 @@ type JobDayGridProps = {
       isOn: boolean;
       isComplete: boolean;
       label: string;
-      latestSubmission?: WeekStatusRow["job_submissions"][number];
+      latestSubmission?: SubmissionItem;
     }
   ) => React.ReactNode;
 };
@@ -756,7 +758,7 @@ export default function AdminDashboard() {
   const handleOpenDetail = (
     day: number,
     jobId: string,
-    submission: WeekStatusRow["job_submissions"][number] | undefined
+    submission: SubmissionItem | undefined
   ) => {
     if (!submission || !selectedWeek) return;
     const rows = statusMap.get(selectionKey(day, jobId)) ?? [];

@@ -65,8 +65,11 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Scheduled job not found." }, { status: 404 });
   }
 
+  const jobDefinition = Array.isArray(scheduledJob.job_definitions)
+    ? scheduledJob.job_definitions[0]
+    : scheduledJob.job_definitions;
   const requirements =
-    scheduledJob.job_definitions?.job_requirements
+    jobDefinition?.job_requirements
       ?.slice()
       .sort((a, b) => a.position - b.position) ?? [];
 

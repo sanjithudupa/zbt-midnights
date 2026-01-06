@@ -248,7 +248,7 @@ export default function UserLogging() {
         await video.play();
       }
       const track = stream.getVideoTracks()[0];
-      const capabilities = track.getCapabilities?.();
+      const capabilities = track.getCapabilities?.() as { torch?: boolean } | undefined;
       setTorchSupported(Boolean(capabilities?.torch));
     } catch (err) {
       setCameraError("Camera permission denied or unavailable.");
@@ -267,7 +267,9 @@ export default function UserLogging() {
     const track = stream.getVideoTracks()[0];
     if (!track?.applyConstraints) return;
     try {
-      await track.applyConstraints({ advanced: [{ torch: !torchOn }] });
+      await track.applyConstraints({
+        advanced: [{ torch: !torchOn } as any],
+      } as MediaTrackConstraints);
       setTorchOn((prev) => !prev);
     } catch {
       setTorchSupported(false);
