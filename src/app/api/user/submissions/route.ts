@@ -110,15 +110,29 @@ export async function POST(request: Request) {
   }
 
   if (requirements.length > 0) {
-    const photoRows = requirements.map((requirement) => {
-      const match = photos.find((photo) => photo.position === requirement.position);
-      return {
+    const secret = process.env.IMG_BB_DELETE_URL_SECRET;
+    const photoRows = [];
+
+    for (const requirement of requirements) {
+      const match = photos.find(
+        (photo: { position: number }) => photo.position === requirement.position
+      );
+      let encryptedDeleteUrl: string | null = null;
+      if (secret && typeof match?.deleteUrl === "string" && match.deleteUrl) {
+        const { data: encrypted } = await supabase.rpc("encrypt_delete_url", {
+          plain_text: match.deleteUrl,
+          secret_text: secret,
+        });
+        encryptedDeleteUrl = encrypted ?? null;
+      }
+      photoRows.push({
         submission_id: submission.id,
         position: requirement.position,
         requirement_description_snapshot: requirement.description,
         imgbb_url: match?.url ?? "",
-      };
-    });
+        imgbb_delete_url_encrypted: encryptedDeleteUrl,
+      });
+    }
 
     const { error: photoError } = await supabase
       .from("submission_photos")

@@ -38,3 +38,24 @@ export async function PATCH(
 
   return NextResponse.json({ user: data });
 }
+
+export async function DELETE(
+  _request: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const unauthorized = await requireAdmin();
+  if (unauthorized) return unauthorized;
+
+  const { id } = await params;
+  const supabase = getServiceSupabase();
+
+  await supabase.from("job_submissions").update({ reviewed_by: null }).eq("reviewed_by", id);
+  await supabase.from("job_submissions").delete().eq("user_id", id);
+
+  const { error } = await supabase.from("users").delete().eq("id", id);
+  if (error) {
+    return NextResponse.json({ error: "Failed to delete user." }, { status: 500 });
+  }
+
+  return NextResponse.json({ ok: true });
+}

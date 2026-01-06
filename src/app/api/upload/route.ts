@@ -36,6 +36,7 @@ export async function POST(request: Request) {
 
   const payload = await response.json();
   const url = payload?.data?.url as string | undefined;
+  const deleteUrl = payload?.data?.delete_url as string | undefined;
 
   if (!url) {
     return NextResponse.json(
@@ -44,5 +45,5 @@ export async function POST(request: Request) {
     );
   }
 
-  return NextResponse.json({ url });
+  return NextResponse.json({ url, deleteUrl });
 }

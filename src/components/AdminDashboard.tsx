@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import type { Dispatch, SetStateAction } from "react";
 import { useRouter } from "next/navigation";
 import { DAY_LABELS, FULL_DAY_LABELS } from "@/lib/constants";
 import type {
@@ -19,13 +20,6 @@ type WeekTemplateWithDays = WeekTemplate & {
     job_definition_id: string;
     sort_order: number;
   }>;
-};
-
-type ScheduledJobItem = {
-  id?: string;
-  day_of_week: number;
-  job_definition_id: string;
-  sort_order: number;
 };
 
 type WeekStatusRow = {
@@ -51,46 +45,262 @@ type WeekStatusRow = {
   }>;
 };
 
+type SelectionMap = Record<string, boolean>;
+
+type DetailModal = {
+  jobName: string;
+  dayLabel: string;
+  submission: WeekStatusRow["job_submissions"][number] | null;
+  photos: Array<{ description: string; url: string | null }>;
+  late: boolean;
+};
+
+type RequirementDraft = {
+  id: string;
+  description: string;
+};
+
+type PhotoViewerState = {
+  photos: Array<{ description: string; url: string | null }>;
+  index: number;
+};
+
+type CleanupSummaryRow = {
+  week_id: string;
+  start_date: string;
+  total_photos: number;
+  deleted_photos: number;
+};
+
+const selectionKey = (day: number, jobId: string) => `${day}:${jobId}`;
+
+const IconEdit = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+    <path d="M12 20h9" strokeWidth="2" />
+    <path
+      d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"
+      strokeWidth="2"
+    />
+  </svg>
+);
+
+const IconTrash = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+    <path d="M3 6h18" strokeWidth="2" />
+    <path d="M8 6V4h8v2" strokeWidth="2" />
+    <path d="M6 6l1 14h10l1-14" strokeWidth="2" />
+  </svg>
+);
+
+const IconRestore = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+    <path d="M4 4v6h6" strokeWidth="2" />
+    <path d="M20 20v-6h-6" strokeWidth="2" />
+    <path d="M20 8a8 8 0 0 0-14.8-4M4 16a8 8 0 0 0 14.8 4" strokeWidth="2" />
+  </svg>
+);
+
+function buildSelectionsFromStatus(rows: WeekStatusRow[]): SelectionMap {
+  const selections: SelectionMap = {};
+  rows.forEach((row) => {
+    selections[selectionKey(row.day_of_week, row.job_definition_id)] = true;
+  });
+  return selections;
+}
+
+function buildSelectionsFromTemplate(template?: WeekTemplateWithDays): SelectionMap {
+  const selections: SelectionMap = {};
+  const days = template?.week_template_days ?? [];
+  days.forEach((day) => {
+    selections[selectionKey(day.day_of_week, day.job_definition_id)] = true;
+  });
+  return selections;
+}
+
+function isLateSubmission(
+  submittedAt: string,
+  weekStartDate: string,
+  dayIndex: number
+) {
+  const start = parseDateInput(weekStartDate);
+  const cutoff = new Date(start);
+  cutoff.setDate(start.getDate() + dayIndex + 1);
+  cutoff.setHours(3, 0, 0, 0);
+  return new Date(submittedAt) > cutoff;
+}
+
+function formatWeekRange(startDate: string) {
+  const start = parseDateInput(startDate);
+  const end = new Date(start);
+  end.setDate(start.getDate() + 6);
+  const format = (date: Date) =>
+    date.toLocaleDateString(undefined, {
+      month: "2-digit",
+      day: "2-digit",
+    });
+  return `Week of ${format(start)}-${format(end)}`;
+}
+
+type JobDayGridProps = {
+  jobList: Array<{ id: string; name: string }>;
+  selections?: SelectionMap;
+  statusMap?: Map<string, WeekStatusRow[]>;
+  renderCell?: (
+    args: {
+      dayIndex: number;
+      jobId: string;
+      statusRows: WeekStatusRow[];
+      isOn: boolean;
+      isComplete: boolean;
+      label: string;
+      latestSubmission?: WeekStatusRow["job_submissions"][number];
+    }
+  ) => React.ReactNode;
+};
+
+function JobDayGrid({ jobList, selections = {}, statusMap, renderCell }: JobDayGridProps) {
+  return (
+    <div className="grid-scroll">
+      <div className="grid-table">
+        <div className="grid-row">
+          <div className="grid-cell head">Job</div>
+          {DAY_LABELS.map((label) => (
+            <div key={label} className="grid-cell head">
+              {label}
+            </div>
+          ))}
+        </div>
+        {jobList.map((job) => (
+          <div key={job.id} className="grid-row">
+            <div className="grid-cell job-name">{job.name}</div>
+            {DAY_LABELS.map((_, dayIndex) => {
+              const key = selectionKey(dayIndex, job.id);
+              const statusRows = statusMap?.get(key) ?? [];
+              const isOn = selections[key] || statusRows.length > 0;
+              const submissions = statusRows.flatMap(
+                (row) => row.job_submissions ?? []
+              );
+              const latestSubmission = submissions
+                .slice()
+                .sort((a, b) =>
+                  new Date(b.submitted_at).getTime() -
+                  new Date(a.submitted_at).getTime()
+                )[0];
+              const isComplete = Boolean(latestSubmission);
+              const label = isComplete
+                ? latestSubmission?.users?.username ?? ""
+                : "";
+
+              if (renderCell) {
+                return (
+                  <div key={key} className="grid-cell no-pad">
+                    {renderCell({
+                      dayIndex,
+                      jobId: job.id,
+                      statusRows,
+                      isOn,
+                      isComplete,
+                      label,
+                      latestSubmission,
+                    })}
+                  </div>
+                );
+              }
+
+              return (
+                <div key={key} className="grid-cell">
+                  {label && <span>{label}</span>}
+                </div>
+              );
+            })}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function AdminDashboard() {
   const router = useRouter();
-  const [tab, setTab] = useState<"weeks" | "jobs" | "users">("weeks");
+  const [tab, setTab] = useState<"overview" | "setup" | "jobs" | "users">(
+    "overview"
+  );
   const [users, setUsers] = useState<User[]>([]);
   const [jobDefinitions, setJobDefinitions] = useState<
     (JobDefinition & { job_requirements?: JobRequirement[] })[]
   >([]);
   const [weeks, setWeeks] = useState<Week[]>([]);
   const [templates, setTemplates] = useState<WeekTemplateWithDays[]>([]);
-  const [selectedTemplateId, setSelectedTemplateId] = useState<string>("");
   const [selectedWeekId, setSelectedWeekId] = useState<string>("");
+  const [weekSelections, setWeekSelections] = useState<SelectionMap>({});
   const [statusRows, setStatusRows] = useState<WeekStatusRow[]>([]);
   const [statusLoading, setStatusLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const [newUserName, setNewUserName] = useState("");
   const [newJobName, setNewJobName] = useState("");
-  const [newRequirementsText, setNewRequirementsText] = useState("");
 
   const [startDate, setStartDate] = useState(formatDateInput(new Date()));
-  const [templateId, setTemplateId] = useState<string>("");
+  const [createTemplateId, setCreateTemplateId] = useState<string>("");
+  const [applyTemplateId, setApplyTemplateId] = useState<string>("");
 
-  const [scheduleDraft, setScheduleDraft] = useState<ScheduledJobItem[]>([]);
-  const [scheduleDay, setScheduleDay] = useState(0);
-  const [scheduleJobDefinitionId, setScheduleJobDefinitionId] = useState("");
+  const [templateEditorOpen, setTemplateEditorOpen] = useState(false);
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string>("");
+  const [templateSelections, setTemplateSelections] = useState<SelectionMap>({});
 
-  const [templateDraft, setTemplateDraft] = useState<ScheduledJobItem[]>([]);
-  const [templateDay, setTemplateDay] = useState(0);
-  const [templateJobDefinitionId, setTemplateJobDefinitionId] = useState("");
+  const [detailModal, setDetailModal] = useState<DetailModal | null>(null);
+  const [photoViewer, setPhotoViewer] = useState<PhotoViewerState | null>(null);
+  const [createWeekOpen, setCreateWeekOpen] = useState(false);
+  const [createTemplateOpen, setCreateTemplateOpen] = useState(false);
+  const [createTemplateName, setCreateTemplateName] = useState("");
+  const [createTemplateSelections, setCreateTemplateSelections] = useState<SelectionMap>({});
+  const [cleanupSummary, setCleanupSummary] = useState<CleanupSummaryRow[]>([]);
+  const [cleanupStatus, setCleanupStatus] = useState<string | null>(null);
+
+  const [jobEditorOpen, setJobEditorOpen] = useState(false);
+  const [editingJobId, setEditingJobId] = useState<string | null>(null);
+  const [editingJobName, setEditingJobName] = useState("");
+  const [editingRequirements, setEditingRequirements] = useState<
+    RequirementDraft[]
+  >([]);
+  const [requirementInput, setRequirementInput] = useState("");
 
   const selectedWeek = weeks.find((week) => week.id === selectedWeekId);
 
-  const sortedSchedule = useMemo(() => {
-    return [...scheduleDraft].sort((a, b) => {
-      if (a.day_of_week !== b.day_of_week) {
-        return a.day_of_week - b.day_of_week;
+  const activeJobDefinitions = useMemo(() => {
+    return jobDefinitions
+      .filter((job) => job.is_active)
+      .slice()
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [jobDefinitions]);
+
+  const weekJobDefinitions = useMemo(() => {
+    const map = new Map<string, string>();
+    statusRows.forEach((row) => {
+      if (row.job_definitions?.name) {
+        map.set(row.job_definition_id, row.job_definitions.name);
       }
-      return a.sort_order - b.sort_order;
     });
-  }, [scheduleDraft]);
+    const list = Array.from(map.entries()).map(([id, name]) => ({ id, name }));
+    list.sort((a, b) => a.name.localeCompare(b.name));
+    return list;
+  }, [statusRows]);
+
+  const statusMap = useMemo(() => {
+    const map = new Map<string, WeekStatusRow[]>();
+    statusRows.forEach((row) => {
+      const key = selectionKey(row.day_of_week, row.job_definition_id);
+      const list = map.get(key) ?? [];
+      list.push(row);
+      map.set(key, list);
+    });
+    return map;
+  }, [statusRows]);
+
+  const selectedCleanup = useMemo(() => {
+    if (!selectedWeekId) return null;
+    return cleanupSummary.find((row) => row.week_id === selectedWeekId) ?? null;
+  }, [cleanupSummary, selectedWeekId]);
 
   useEffect(() => {
     const loadAll = async () => {
@@ -107,27 +317,20 @@ export default function AdminDashboard() {
   useEffect(() => {
     if (selectedWeekId) {
       loadWeekStatus(selectedWeekId);
-      loadWeekSchedule(selectedWeekId);
+      loadCleanupSummary();
     } else {
       setStatusRows([]);
-      setScheduleDraft([]);
+      setWeekSelections({});
     }
   }, [selectedWeekId]);
 
   useEffect(() => {
     if (!selectedTemplateId) {
-      setTemplateDraft([]);
+      setTemplateSelections({});
       return;
     }
     const template = templates.find((item) => item.id === selectedTemplateId);
-    const days = template?.week_template_days ?? [];
-    setTemplateDraft(
-      days.map((day) => ({
-        day_of_week: day.day_of_week,
-        job_definition_id: day.job_definition_id,
-        sort_order: day.sort_order,
-      }))
-    );
+    setTemplateSelections(buildSelectionsFromTemplate(template));
   }, [selectedTemplateId, templates]);
 
   const loadUsers = async () => {
@@ -151,6 +354,9 @@ export default function AdminDashboard() {
     if (response.ok) {
       const data = await response.json();
       setWeeks(data.weeks ?? []);
+      if (!selectedWeekId && data.weeks?.length) {
+        setSelectedWeekId(data.weeks[0].id);
+      }
     }
   };
 
@@ -171,21 +377,18 @@ export default function AdminDashboard() {
     setStatusLoading(false);
     if (response.ok) {
       const data = await response.json();
-      setStatusRows(data.scheduledJobs ?? []);
+      const rows = data.scheduledJobs ?? [];
+      setStatusRows(rows);
+      setWeekSelections(buildSelectionsFromStatus(rows));
     }
   };
 
-  const loadWeekSchedule = async (weekId: string) => {
-    const response = await fetch(`/api/admin/weeks/${weekId}/status`);
-    if (!response.ok) return;
-    const data = await response.json();
-    const schedule = (data.scheduledJobs ?? []).map((row: WeekStatusRow) => ({
-      id: row.id,
-      day_of_week: row.day_of_week,
-      job_definition_id: row.job_definition_id,
-      sort_order: row.sort_order,
-    }));
-    setScheduleDraft(schedule);
+  const loadCleanupSummary = async () => {
+    const response = await fetch("/api/admin/cleanup");
+    if (response.ok) {
+      const data = await response.json();
+      setCleanupSummary(data.summary ?? []);
+    }
   };
 
   const handleLogout = async () => {
@@ -220,12 +423,24 @@ export default function AdminDashboard() {
     }
   };
 
+  const handleDeleteUser = async (userId: string) => {
+    const confirmed = window.confirm("Delete this user permanently?");
+    if (!confirmed) return;
+    const response = await fetch(`/api/admin/users/${userId}`, {
+      method: "DELETE",
+    });
+    if (response.ok) {
+      loadUsers();
+    }
+  };
+
   const handleCreateJobDefinition = async () => {
     setError(null);
+    if (!newJobName.trim()) return;
     const response = await fetch("/api/admin/job-definitions", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: newJobName }),
+      body: JSON.stringify({ name: newJobName.trim() }),
     });
     if (!response.ok) {
       const data = await response.json();
@@ -233,19 +448,12 @@ export default function AdminDashboard() {
       return;
     }
     const data = await response.json();
-    if (newRequirementsText.trim()) {
-      await fetch(`/api/admin/job-definitions/${data.jobDefinition.id}/requirements`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          requirements: newRequirementsText
-            .split("\n")
-            .map((line) => ({ description: line })),
-        }),
-      });
-    }
     setNewJobName("");
-    setNewRequirementsText("");
+    setEditingJobId(data.jobDefinition.id);
+    setEditingJobName(data.jobDefinition.name);
+    setEditingRequirements([]);
+    setRequirementInput("");
+    setJobEditorOpen(true);
     loadJobDefinitions();
   };
 
@@ -265,7 +473,7 @@ export default function AdminDashboard() {
 
   const handleRequirementsUpdate = async (
     jobDefinitionId: string,
-    requirementsText: string
+    requirements: RequirementDraft[]
   ) => {
     const response = await fetch(
       `/api/admin/job-definitions/${jobDefinitionId}/requirements`,
@@ -273,15 +481,36 @@ export default function AdminDashboard() {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          requirements: requirementsText
-            .split("\n")
-            .map((line) => ({ description: line })),
+          requirements: requirements.map((req) => ({
+            description: req.description,
+          })),
         }),
       }
     );
     if (response.ok) {
       loadJobDefinitions();
     }
+  };
+
+  const handleOpenJobEditor = (job: JobDefinition & { job_requirements?: JobRequirement[] }) => {
+    setEditingJobId(job.id);
+    setEditingJobName(job.name);
+    const reqs = (job.job_requirements ?? [])
+      .slice()
+      .sort((a, b) => a.position - b.position)
+      .map((req) => ({ id: crypto.randomUUID(), description: req.description }));
+    setEditingRequirements(reqs);
+    setRequirementInput("");
+    setJobEditorOpen(true);
+  };
+
+  const handleSaveJobEditor = async () => {
+    if (!editingJobId) return;
+    const job = jobDefinitions.find((item) => item.id === editingJobId);
+    if (!job) return;
+    await handleJobUpdate(job, { name: editingJobName });
+    await handleRequirementsUpdate(editingJobId, editingRequirements);
+    setJobEditorOpen(false);
   };
 
   const handleCreateWeek = async () => {
@@ -294,67 +523,77 @@ export default function AdminDashboard() {
     const response = await fetch("/api/admin/weeks", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ start_date: startDate, template_id: templateId || null }),
+      body: JSON.stringify({
+        start_date: startDate,
+        template_id: createTemplateId || null,
+      }),
     });
     if (!response.ok) {
       const data = await response.json();
       setError(data.error ?? "Failed to create week.");
       return;
     }
+    setCreateWeekOpen(false);
     await loadWeeks();
   };
 
-  const handleAddScheduleItem = () => {
-    if (!scheduleJobDefinitionId) return;
-    setScheduleDraft((prev) => [
-      ...prev,
-      {
-        day_of_week: scheduleDay,
-        job_definition_id: scheduleJobDefinitionId,
-        sort_order: prev.filter((item) => item.day_of_week === scheduleDay).length,
-      },
-    ]);
-  };
-
-  const handleRemoveScheduleItem = (target: ScheduledJobItem) => {
-    setScheduleDraft((prev) => {
-      const index = prev.findIndex((item) => item === target);
-      if (index === -1) return prev;
-      return prev.filter((_, idx) => idx !== index);
+  const toggleSelection = (
+    updater: Dispatch<SetStateAction<SelectionMap>>,
+    day: number,
+    jobId: string
+  ) => {
+    updater((prev) => {
+      const next = { ...prev };
+      const key = selectionKey(day, jobId);
+      if (next[key]) {
+        delete next[key];
+      } else {
+        next[key] = true;
+      }
+      return next;
     });
   };
 
-  const handleSaveSchedule = async () => {
+  const buildSchedulePayload = (selections: SelectionMap) => {
+    const rows: Array<{
+      day_of_week: number;
+      job_definition_id: string;
+      sort_order: number;
+    }> = [];
+
+    for (let day = 0; day < 7; day += 1) {
+      let order = 0;
+      activeJobDefinitions.forEach((job) => {
+        if (selections[selectionKey(day, job.id)]) {
+          rows.push({
+            day_of_week: day,
+            job_definition_id: job.id,
+            sort_order: order,
+          });
+          order += 1;
+        }
+      });
+    }
+
+    return rows;
+  };
+
+  const handleSaveWeekSchedule = async () => {
     if (!selectedWeekId) return;
     const response = await fetch(`/api/admin/weeks/${selectedWeekId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ schedule: scheduleDraft }),
+      body: JSON.stringify({ schedule: buildSchedulePayload(weekSelections) }),
     });
     if (response.ok) {
       loadWeekStatus(selectedWeekId);
     }
   };
 
-  const handleAddTemplateItem = () => {
-    if (!templateJobDefinitionId) return;
-    setTemplateDraft((prev) => [
-      ...prev,
-      {
-        day_of_week: templateDay,
-        job_definition_id: templateJobDefinitionId,
-        sort_order: prev.filter((item) => item.day_of_week === templateDay)
-          .length,
-      },
-    ]);
-  };
-
-  const handleRemoveTemplateItem = (target: ScheduledJobItem) => {
-    setTemplateDraft((prev) => {
-      const index = prev.findIndex((item) => item === target);
-      if (index === -1) return prev;
-      return prev.filter((_, idx) => idx !== index);
-    });
+  const handleApplyTemplate = () => {
+    if (!applyTemplateId) return;
+    const template = templates.find((item) => item.id === applyTemplateId);
+    setWeekSelections(buildSelectionsFromTemplate(template));
   };
 
   const handleSaveTemplate = async () => {
@@ -364,7 +603,9 @@ export default function AdminDashboard() {
       {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ days: templateDraft }),
+        body: JSON.stringify({
+          days: buildSchedulePayload(templateSelections),
+        }),
       }
     );
     if (response.ok) {
@@ -372,12 +613,117 @@ export default function AdminDashboard() {
     }
   };
 
+  const handleOpenCreateTemplate = () => {
+    setCreateTemplateName("");
+    setCreateTemplateSelections({});
+    setCreateTemplateOpen(true);
+  };
+
+  const handleSubmitCreateTemplate = async () => {
+    const name = createTemplateName.trim();
+    if (!name) return;
+    const response = await fetch("/api/admin/week-templates", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    });
+    if (!response.ok) return;
+    const data = await response.json();
+    await fetch(`/api/admin/week-templates/${data.template.id}/days`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        days: buildSchedulePayload(createTemplateSelections),
+      }),
+    });
+    await loadTemplates();
+    setSelectedTemplateId(data.template.id);
+    setTemplateSelections(createTemplateSelections);
+    setCreateTemplateOpen(false);
+    setTemplateEditorOpen(true);
+  };
+
+  const handleDeleteTemplate = async () => {
+    if (!selectedTemplateId) return;
+    const confirmed = window.confirm("Delete this template?");
+    if (!confirmed) return;
+    const response = await fetch(
+      `/api/admin/week-templates/${selectedTemplateId}`,
+      { method: "DELETE" }
+    );
+    if (response.ok) {
+      setSelectedTemplateId("");
+      setTemplateSelections({});
+      loadTemplates();
+    }
+  };
+
+  const handleCleanupWeek = async (weekId: string) => {
+    setCleanupStatus(null);
+    const confirmed = window.confirm(
+      "Delete all ImgBB images for this week?"
+    );
+    if (!confirmed) return;
+    const response = await fetch("/api/admin/cleanup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ weekId }),
+    });
+    if (!response.ok) {
+      setCleanupStatus("Cleanup failed.");
+      return;
+    }
+    const data = await response.json();
+    setCleanupStatus(
+      `Deleted ${data.deleted} of ${data.attempted} images.`
+    );
+    loadCleanupSummary();
+  };
+
+  const handleOpenDetail = (
+    day: number,
+    jobId: string,
+    submission: WeekStatusRow["job_submissions"][number] | undefined
+  ) => {
+    if (!submission || !selectedWeek) return;
+    const rows = statusMap.get(selectionKey(day, jobId)) ?? [];
+    const jobName =
+      rows[0]?.job_definitions?.name ??
+      weekJobDefinitions.find((job) => job.id === jobId)?.name ??
+      "Job";
+
+    const photos =
+      submission.submission_photos
+        ?.slice()
+        .sort((a, b) => a.position - b.position)
+        .map((photo) => ({
+          description: photo.requirement_description_snapshot,
+          url: photo.imgbb_url,
+        })) ?? [];
+
+    const late = isLateSubmission(submission.submitted_at, selectedWeek.start_date, day);
+
+    setDetailModal({
+      jobName,
+      dayLabel: FULL_DAY_LABELS[day] ?? "Day",
+      submission,
+      photos,
+      late,
+    });
+  };
+
+  const weekPreviewSelections = useMemo(() => {
+    const template = templates.find((item) => item.id === createTemplateId);
+    return buildSelectionsFromTemplate(template);
+  }, [templates, createTemplateId]);
+
+  const previewWeekList = weekPreviewSelections;
+
   return (
     <div className="page">
       <header className="topbar">
         <div>
-          <h1>Admin Dashboard</h1>
-          <p className="muted">Manage schedules, jobs, and users.</p>
+          <h1>Midnight Maker Admin</h1>
         </div>
         <button className="ghost" onClick={handleLogout}>
           Log out
@@ -388,10 +734,16 @@ export default function AdminDashboard() {
 
       <div className="tabs">
         <button
-          className={tab === "weeks" ? "tab active" : "tab"}
-          onClick={() => setTab("weeks")}
+          className={tab === "overview" ? "tab active" : "tab"}
+          onClick={() => setTab("overview")}
         >
-          Weeks & Scheduling
+          Week Overview
+        </button>
+        <button
+          className={tab === "setup" ? "tab active" : "tab"}
+          onClick={() => setTab("setup")}
+        >
+          Week Setup
         </button>
         <button
           className={tab === "jobs" ? "tab active" : "tab"}
@@ -407,20 +759,238 @@ export default function AdminDashboard() {
         </button>
       </div>
 
+      {tab === "overview" && (
+        <section className="card">
+          <h2>Week Overview</h2>
+          <div className="row">
+            <label className="field">
+              <span>Select week</span>
+              <select
+                value={selectedWeekId}
+                onChange={(event) => setSelectedWeekId(event.target.value)}
+              >
+                <option value="">Select week</option>
+                {weeks.map((week) => (
+                  <option key={week.id} value={week.id}>
+                    {week.start_date}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          {statusLoading && <div className="muted">Loading status...</div>}
+          {selectedWeek && weekJobDefinitions.length === 0 && (
+            <div className="muted">No scheduled jobs for this week yet.</div>
+          )}
+          {selectedWeek && weekJobDefinitions.length > 0 && (
+            <JobDayGrid
+              jobList={weekJobDefinitions}
+              statusMap={statusMap}
+              renderCell={({ dayIndex, jobId, isOn, isComplete, label, latestSubmission }) => {
+                const late =
+                  isComplete &&
+                  selectedWeek &&
+                  latestSubmission
+                    ? isLateSubmission(
+                        latestSubmission.submitted_at,
+                        selectedWeek.start_date,
+                        dayIndex
+                      )
+                    : false;
+                const statusClass = late
+                  ? "late"
+                  : isComplete
+                    ? "complete"
+                    : isOn
+                      ? "scheduled"
+                      : "not-scheduled";
+                const text = isComplete ? label : isOn ? "--" : "";
+
+                return (
+                  <button
+                    type="button"
+                    className={`status-box ${statusClass}`}
+                    onClick={() =>
+                      isComplete && latestSubmission
+                        ? handleOpenDetail(dayIndex, jobId, latestSubmission)
+                        : undefined
+                    }
+                    disabled={!isComplete}
+                  >
+                    {text}
+                  </button>
+                );
+              }}
+            />
+          )}
+          {selectedWeek && (
+            <div className="stack">
+              <strong>Cleanup</strong>
+              {cleanupStatus && <div className="muted">{cleanupStatus}</div>}
+              <div className="row">
+                <span>
+                  {selectedCleanup
+                    ? `${selectedCleanup.deleted_photos}/${selectedCleanup.total_photos} deleted`
+                    : "0/0 deleted"}
+                </span>
+                <button
+                  className="ghost"
+                  onClick={() => handleCleanupWeek(selectedWeek.id)}
+                >
+                  Delete ImgBB images
+                </button>
+              </div>
+            </div>
+          )}
+        </section>
+      )}
+
+      {tab === "setup" && (
+        <section className="card">
+          <h2>Week Setup</h2>
+          <label className="field block-gap">
+            <span>Select week</span>
+            <select
+              value={selectedWeekId}
+              onChange={(event) => {
+                if (event.target.value === "__create__") {
+                  setCreateWeekOpen(true);
+                  return;
+                }
+                setSelectedWeekId(event.target.value);
+              }}
+            >
+              <option value="">Select week</option>
+              {weeks.map((week) => (
+                <option key={week.id} value={week.id}>
+                  {week.start_date}
+                </option>
+              ))}
+              <option value="__create__">Create week...</option>
+            </select>
+          </label>
+
+          {selectedWeek && (
+            <div className="stack">
+              <div className="row">
+                <span className="muted">
+                  {formatWeekRange(selectedWeek.start_date)}
+                </span>
+                <select
+                  value={applyTemplateId}
+                  onChange={(event) => {
+                    if (event.target.value === "__create_template__") {
+                      setApplyTemplateId("");
+                      handleOpenCreateTemplate();
+                      return;
+                    }
+                    setApplyTemplateId(event.target.value);
+                  }}
+                >
+                  <option value="">Select template</option>
+                  {templates.map((template) => (
+                    <option key={template.id} value={template.id}>
+                      {template.name}
+                    </option>
+                  ))}
+                  <option value="__create_template__">Create template...</option>
+                </select>
+                <button
+                  className="primary"
+                  onClick={handleApplyTemplate}
+                  disabled={!applyTemplateId}
+                >
+                  Apply Template
+                </button>
+                <button
+                  className="ghost"
+                  onClick={() => {
+                    if (!applyTemplateId) return;
+                    setSelectedTemplateId(applyTemplateId);
+                    setTemplateEditorOpen(true);
+                  }}
+                  disabled={!applyTemplateId}
+                >
+                  <IconEdit />
+                </button>
+              </div>
+
+              <JobDayGrid
+                jobList={activeJobDefinitions}
+                selections={weekSelections}
+                renderCell={({ dayIndex, jobId, isOn }) => (
+                  <div className="checkbox-cell">
+                    <input
+                      type="checkbox"
+                      checked={isOn}
+                      onChange={() =>
+                        toggleSelection(setWeekSelections, dayIndex, jobId)
+                      }
+                    />
+                  </div>
+                )}
+              />
+
+              <button className="primary" onClick={handleSaveWeekSchedule}>
+                Save Week Setup
+              </button>
+            </div>
+          )}
+        </section>
+      )}
+
+      {tab === "jobs" && (
+        <section className="card">
+          <h2>Job Definitions</h2>
+          <div className="list">
+            <div className="list-row">
+              <input
+                placeholder="Job name"
+                value={newJobName}
+                onChange={(event) => setNewJobName(event.target.value)}
+              />
+              <button className="primary" onClick={handleCreateJobDefinition}>
+                Add Job
+              </button>
+            </div>
+            {jobDefinitions.map((job) => (
+              <div key={job.id} className="list-row">
+                <div className="stack">
+                  <strong>{job.name}</strong>
+                  <span className="muted">
+                    {(job.job_requirements ?? []).length} photos required
+                  </span>
+                </div>
+                <button className="icon" onClick={() => handleOpenJobEditor(job)}>
+                  <IconEdit />
+                </button>
+                <button
+                  className="icon"
+                  onClick={() => handleJobUpdate(job, { is_active: !job.is_active })}
+                >
+                  {job.is_active ? <IconTrash /> : <IconRestore />}
+                </button>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
       {tab === "users" && (
         <section className="card">
           <h2>Users</h2>
-          <div className="row">
-            <input
-              placeholder="New username"
-              value={newUserName}
-              onChange={(event) => setNewUserName(event.target.value)}
-            />
-            <button className="primary" onClick={handleCreateUser}>
-              Add
-            </button>
-          </div>
           <div className="list">
+            <div className="list-row">
+              <input
+                placeholder="Username"
+                value={newUserName}
+                onChange={(event) => setNewUserName(event.target.value)}
+              />
+              <button className="primary" onClick={handleCreateUser}>
+                Add
+              </button>
+            </div>
             {users.map((user) => (
               <div key={user.id} className="list-row">
                 <input
@@ -429,84 +999,25 @@ export default function AdminDashboard() {
                     handleUserUpdate(user, { username: event.target.value })
                   }
                 />
-                <label className="inline">
-                  <input
-                    type="checkbox"
-                    checked={user.is_active}
-                    onChange={(event) =>
-                      handleUserUpdate(user, { is_active: event.target.checked })
-                    }
-                  />
-                  Active
-                </label>
+                <button className="icon" onClick={() => handleDeleteUser(user.id)}>
+                  <IconTrash />
+                </button>
               </div>
             ))}
           </div>
         </section>
       )}
 
-      {tab === "jobs" && (
-        <section className="card">
-          <h2>Job Definitions</h2>
-          <div className="stack">
-            <input
-              placeholder="Job name"
-              value={newJobName}
-              onChange={(event) => setNewJobName(event.target.value)}
-            />
-            <textarea
-              placeholder="Photo requirements (one per line)"
-              value={newRequirementsText}
-              rows={4}
-              onChange={(event) => setNewRequirementsText(event.target.value)}
-            />
-            <button className="primary" onClick={handleCreateJobDefinition}>
-              Create Job
-            </button>
-          </div>
-
-          <div className="list">
-            {jobDefinitions.map((job) => (
-              <div key={job.id} className="list-row">
-                <div className="stack">
-                  <input
-                    defaultValue={job.name}
-                    onBlur={(event) =>
-                      handleJobUpdate(job, { name: event.target.value })
-                    }
-                  />
-                  <textarea
-                    rows={3}
-                    defaultValue={(job.job_requirements ?? [])
-                      .sort((a, b) => a.position - b.position)
-                      .map((req) => req.description)
-                      .join("\n")}
-                    onBlur={(event) =>
-                      handleRequirementsUpdate(job.id, event.target.value)
-                    }
-                  />
-                  <label className="inline">
-                    <input
-                      type="checkbox"
-                      checked={job.is_active}
-                      onChange={(event) =>
-                        handleJobUpdate(job, { is_active: event.target.checked })
-                      }
-                    />
-                    Active
-                  </label>
-                </div>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
-
-      {tab === "weeks" && (
-        <section className="card">
-          <h2>Weeks & Scheduling</h2>
-          <div className="grid-two">
-            <div className="stack">
+      {createWeekOpen && (
+        <div className="modal">
+          <div className="modal-card large">
+            <div className="modal-header">
+              <h3>Create Week</h3>
+              <button className="icon" onClick={() => setCreateWeekOpen(false)}>
+                x
+              </button>
+            </div>
+            <div className="grid-two">
               <label className="field">
                 <span>Start date (Monday)</span>
                 <input
@@ -518,8 +1029,8 @@ export default function AdminDashboard() {
               <label className="field">
                 <span>Template</span>
                 <select
-                  value={templateId}
-                  onChange={(event) => setTemplateId(event.target.value)}
+                  value={createTemplateId}
+                  onChange={(event) => setCreateTemplateId(event.target.value)}
                 >
                   <option value="">Select template</option>
                   {templates.map((template) => (
@@ -529,95 +1040,84 @@ export default function AdminDashboard() {
                   ))}
                 </select>
               </label>
-              <button className="primary" onClick={handleCreateWeek}>
-                Create Week
-              </button>
             </div>
             <div className="stack">
-              <label className="field">
-                <span>Existing weeks</span>
-                <select
-                  value={selectedWeekId}
-                  onChange={(event) => setSelectedWeekId(event.target.value)}
-                >
-                  <option value="">Select week</option>
-                  {weeks.map((week) => (
-                    <option key={week.id} value={week.id}>
-                      {week.start_date}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              {selectedWeek && (
-                <div className="muted">
-                  Selected week starts {selectedWeek.start_date}
+              <span className="muted">Preview</span>
+              <JobDayGrid
+                jobList={activeJobDefinitions}
+                selections={previewWeekList}
+                renderCell={({ isOn }) => (
+                  <div className={`status-box ${isOn ? "scheduled" : "not-scheduled"}`}>
+                    {isOn ? "--" : ""}
+                  </div>
+                )}
+              />
+            </div>
+            <button className="primary" onClick={handleCreateWeek}>
+              Create
+            </button>
+          </div>
+        </div>
+      )}
+
+      {createTemplateOpen && (
+        <div className="modal">
+          <div className="modal-card large">
+            <div className="modal-header">
+              <h3>Create Template</h3>
+              <button className="icon" onClick={() => setCreateTemplateOpen(false)}>
+                x
+              </button>
+            </div>
+            <label className="field">
+              <span>Template name</span>
+              <input
+                value={createTemplateName}
+                onChange={(event) => setCreateTemplateName(event.target.value)}
+              />
+            </label>
+            <JobDayGrid
+              jobList={activeJobDefinitions}
+              selections={createTemplateSelections}
+              renderCell={({ dayIndex, jobId, isOn }) => (
+                <div className="checkbox-cell">
+                  <input
+                    type="checkbox"
+                    checked={isOn}
+                    onChange={() =>
+                      toggleSelection(setCreateTemplateSelections, dayIndex, jobId)
+                    }
+                  />
                 </div>
               )}
-            </div>
+            />
+            <button className="primary" onClick={handleSubmitCreateTemplate}>
+              Create Template
+            </button>
           </div>
+        </div>
+      )}
 
-          {selectedWeek && (
-            <div className="stack">
-              <h3>Schedule Editor</h3>
-              <div className="row">
-                <select
-                  value={scheduleDay}
-                  onChange={(event) => setScheduleDay(Number(event.target.value))}
-                >
-                  {FULL_DAY_LABELS.map((label, index) => (
-                    <option key={label} value={index}>
-                      {label}
-                    </option>
-                  ))}
-                </select>
-                <select
-                  value={scheduleJobDefinitionId}
-                  onChange={(event) =>
-                    setScheduleJobDefinitionId(event.target.value)
-                  }
-                >
-                  <option value="">Select job</option>
-                  {jobDefinitions.map((job) => (
-                    <option key={job.id} value={job.id}>
-                      {job.name}
-                    </option>
-                  ))}
-                </select>
-                <button className="ghost" onClick={handleAddScheduleItem}>
-                  Add
-                </button>
-              </div>
-              <div className="list">
-                {sortedSchedule.map((item, index) => (
-                  <div key={`${item.day_of_week}-${index}`} className="list-row">
-                    <span className="pill">{DAY_LABELS[item.day_of_week]}</span>
-                    <span>
-                      {jobDefinitions.find(
-                        (job) => job.id === item.job_definition_id
-                      )?.name ?? "Job"}
-                    </span>
-                    <button
-                      className="ghost"
-                      onClick={() => handleRemoveScheduleItem(item)}
-                    >
-                      Remove
-                    </button>
-                  </div>
-                ))}
-              </div>
-              <button className="primary" onClick={handleSaveSchedule}>
-                Save Schedule
+      {templateEditorOpen && (
+        <div className="modal">
+          <div className="modal-card large">
+            <div className="modal-header">
+              <h3>Edit Template</h3>
+              <button className="icon" onClick={() => setTemplateEditorOpen(false)}>
+                x
               </button>
             </div>
-          )}
-
-          <div className="stack">
-            <h3>Template Builder</h3>
-            <label className="field">
-              <span>Template</span>
+            <div className="row">
               <select
                 value={selectedTemplateId}
-                onChange={(event) => setSelectedTemplateId(event.target.value)}
+                onChange={(event) => {
+                  if (event.target.value === "__create_template__") {
+                    setTemplateEditorOpen(false);
+                    handleOpenCreateTemplate();
+                    return;
+                  }
+                  setSelectedTemplateId(event.target.value);
+                }}
               >
                 <option value="">Select template</option>
                 {templates.map((template) => (
@@ -625,112 +1125,212 @@ export default function AdminDashboard() {
                     {template.name}
                   </option>
                 ))}
+                <option value="__create_template__">Create template...</option>
               </select>
-            </label>
+              <button
+                className="icon"
+                onClick={handleDeleteTemplate}
+                disabled={!selectedTemplateId}
+              >
+                <IconTrash />
+              </button>
+            </div>
             {selectedTemplateId && (
-              <>
-                <div className="row">
-                  <select
-                    value={templateDay}
-                    onChange={(event) =>
-                      setTemplateDay(Number(event.target.value))
+              <JobDayGrid
+                jobList={activeJobDefinitions}
+                selections={templateSelections}
+                renderCell={({ dayIndex, jobId, isOn }) => (
+                  <div className="checkbox-cell">
+                    <input
+                      type="checkbox"
+                      checked={isOn}
+                      onChange={() =>
+                        toggleSelection(setTemplateSelections, dayIndex, jobId)
+                      }
+                    />
+                  </div>
+                )}
+              />
+            )}
+            <button className="primary" onClick={handleSaveTemplate}>
+              Save Template
+            </button>
+          </div>
+        </div>
+      )}
+
+      {jobEditorOpen && editingJobId && (
+        <div className="modal">
+          <div className="modal-card large">
+            <div className="modal-header">
+              <h3>Edit Job</h3>
+              <button className="icon" onClick={() => setJobEditorOpen(false)}>
+                x
+              </button>
+            </div>
+            <label className="field">
+              <span>Job name</span>
+              <input
+                value={editingJobName}
+                onChange={(event) => setEditingJobName(event.target.value)}
+              />
+            </label>
+            <div className="row">
+              <input
+                placeholder="Requirement"
+                value={requirementInput}
+                onChange={(event) => setRequirementInput(event.target.value)}
+              />
+              <button
+                className="ghost"
+                onClick={() => {
+                  if (!requirementInput.trim()) return;
+                  setEditingRequirements((prev) => [
+                    ...prev,
+                    { id: crypto.randomUUID(), description: requirementInput.trim() },
+                  ]);
+                  setRequirementInput("");
+                }}
+              >
+                +
+              </button>
+            </div>
+            <div className="list">
+              {editingRequirements.map((req) => (
+                <div key={req.id} className="list-row">
+                  <span>{req.description}</span>
+                  <button
+                    className="icon"
+                    onClick={() =>
+                      setEditingRequirements((prev) =>
+                        prev.filter((item) => item.id !== req.id)
+                      )
                     }
                   >
-                    {FULL_DAY_LABELS.map((label, index) => (
-                      <option key={label} value={index}>
-                        {label}
-                      </option>
-                    ))}
-                  </select>
-                  <select
-                    value={templateJobDefinitionId}
-                    onChange={(event) =>
-                      setTemplateJobDefinitionId(event.target.value)
-                    }
-                  >
-                    <option value="">Select job</option>
-                    {jobDefinitions.map((job) => (
-                      <option key={job.id} value={job.id}>
-                        {job.name}
-                      </option>
-                    ))}
-                  </select>
-                  <button className="ghost" onClick={handleAddTemplateItem}>
-                    Add
+                    x
                   </button>
                 </div>
-                <div className="list">
-                  {[...templateDraft]
-                    .sort((a, b) => {
-                      if (a.day_of_week !== b.day_of_week) {
-                        return a.day_of_week - b.day_of_week;
+              ))}
+            </div>
+            <button className="primary" onClick={handleSaveJobEditor}>
+              Save
+            </button>
+          </div>
+        </div>
+      )}
+
+      {detailModal && (
+        <div className="modal">
+          <div className="modal-card large">
+            <div className="modal-header">
+              <div>
+                <h3>{detailModal.jobName}</h3>
+                <p className="muted">{detailModal.dayLabel}</p>
+              </div>
+              <button className="icon" onClick={() => setDetailModal(null)}>
+                x
+              </button>
+            </div>
+            {detailModal.submission ? (
+              <div className="stack">
+                <div className="row">
+                  <span className={`badge ${detailModal.late ? "warning" : ""}`}>
+                    {detailModal.submission.users?.username ?? "Submitted"}
+                  </span>
+                  <span className={`muted ${detailModal.late ? "warning" : ""}`}>
+                    {new Date(detailModal.submission.submitted_at).toLocaleString(
+                      undefined,
+                      {
+                        weekday: "long",
+                        year: "numeric",
+                        month: "short",
+                        day: "numeric",
+                        hour: "numeric",
+                        minute: "2-digit",
                       }
-                      return a.sort_order - b.sort_order;
-                    })
-                    .map((item, index) => (
-                      <div key={`${item.day_of_week}-${index}`} className="list-row">
-                        <span className="pill">{DAY_LABELS[item.day_of_week]}</span>
-                        <span>
-                          {jobDefinitions.find(
-                            (job) => job.id === item.job_definition_id
-                          )?.name ?? "Job"}
-                        </span>
-                        <button
-                          className="ghost"
-                          onClick={() => handleRemoveTemplateItem(item)}
-                        >
-                          Remove
-                        </button>
-                      </div>
-                    ))}
+                    )}
+                  </span>
                 </div>
-                <button className="primary" onClick={handleSaveTemplate}>
-                  Save Template
-                </button>
-              </>
+                <div className="photo-list">
+                  {detailModal.photos.map((photo, index) => (
+                    <button
+                      key={`${photo.description}-${index}`}
+                      className="photo-card"
+                      onClick={() =>
+                        setPhotoViewer({ photos: detailModal.photos, index })
+                      }
+                    >
+                      <div className="muted">{photo.description}</div>
+                      {photo.url ? (
+                        <img src={photo.url} alt={photo.description} />
+                      ) : (
+                        <div className="muted">No photo uploaded.</div>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div className="muted">No submission yet for this job.</div>
             )}
           </div>
+        </div>
+      )}
 
-          {selectedWeek && (
-            <div className="stack">
-              <h3>Week Status</h3>
-              {statusLoading && <div className="muted">Loading status…</div>}
-              <div className="table">
-                <div className="table-row header">
-                  <span>Day</span>
-                  <span>Job</span>
-                  <span>Requirements</span>
-                  <span>Submitted</span>
-                  <span>Submitted By</span>
-                  <span>Submitted At</span>
-                </div>
-                {statusRows.map((row) => {
-                  const submissions = row.job_submissions ?? [];
-                  const submission = submissions[0];
-                  return (
-                    <div key={row.id} className="table-row">
-                      <span>{DAY_LABELS[row.day_of_week]}</span>
-                      <span>{row.job_definitions?.name ?? "Job"}</span>
-                      <span>
-                        {(row.job_definitions?.job_requirements ?? [])
-                          .sort((a, b) => a.position - b.position)
-                          .map((req) => req.description)
-                          .join(", ") || "None"}
-                      </span>
-                      <span>{submissions.length > 0 ? "Yes" : "No"}</span>
-                      <span>{submission?.users?.username ?? "-"}</span>
-                      <span>
-                        {submission?.submitted_at
-                          ? new Date(submission.submitted_at).toLocaleString()
-                          : "-"}
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
+      {photoViewer && (
+        <div className="modal">
+          <div className="modal-card fullscreen">
+            <div className="modal-header">
+              <h3>Photo</h3>
+              <button className="icon" onClick={() => setPhotoViewer(null)}>
+                x
+              </button>
             </div>
-          )}
-        </section>
+            {photoViewer.photos[photoViewer.index]?.url ? (
+              <img
+                src={photoViewer.photos[photoViewer.index].url ?? ""}
+                alt={photoViewer.photos[photoViewer.index].description}
+              />
+            ) : (
+              <div className="muted">No photo available.</div>
+            )}
+            <div className="row">
+              <button
+                className="ghost"
+                onClick={() =>
+                  setPhotoViewer((prev) =>
+                    prev
+                      ? {
+                          ...prev,
+                          index:
+                            (prev.index - 1 + prev.photos.length) %
+                            prev.photos.length,
+                        }
+                      : prev
+                  )
+                }
+              >
+                {"<"}
+              </button>
+              <span>{photoViewer.photos[photoViewer.index].description}</span>
+              <button
+                className="ghost"
+                onClick={() =>
+                  setPhotoViewer((prev) =>
+                    prev
+                      ? {
+                          ...prev,
+                          index: (prev.index + 1) % prev.photos.length,
+                        }
+                      : prev
+                  )
+                }
+              >
+                {">"}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

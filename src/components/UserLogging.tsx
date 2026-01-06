@@ -37,6 +37,7 @@ type PhotoSlot = {
   position: number;
   description: string;
   url?: string;
+  deleteUrl?: string;
   uploading?: boolean;
 };
 
@@ -206,7 +207,12 @@ export default function UserLogging() {
     setPhotoSlots((prev) =>
       prev.map((slot) =>
         slot.position === position
-          ? { ...slot, url: data.url, uploading: false }
+          ? {
+              ...slot,
+              url: data.url,
+              deleteUrl: data.deleteUrl,
+              uploading: false,
+            }
           : slot
       )
     );
@@ -228,6 +234,7 @@ export default function UserLogging() {
         photos: photoSlots.map((slot) => ({
           position: slot.position,
           url: slot.url,
+          deleteUrl: slot.deleteUrl,
         })),
       }),
     });
