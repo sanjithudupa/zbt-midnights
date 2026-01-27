@@ -58,6 +58,19 @@ button {
   gap: 20px;
 }
 
+.a2hs-inline {
+  margin-top: 12px;
+  border: 1px solid var(--border);
+  background: #fff;
+  padding: 8px 10px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.85rem;
+  text-align: center;
+}
+
 .topbar {
   display: flex;
   align-items: center;

@@ -18,6 +18,8 @@ export default function HomePage() {
   const [selectedUser, setSelectedUser] = useState<string>("");
   const [adminPassword, setAdminPassword] = useState("");
   const [showAdminPassword, setShowAdminPassword] = useState(false);
+  const [showA2hs, setShowA2hs] = useState(false);
+  const [a2hsText, setA2hsText] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -41,6 +43,31 @@ export default function HomePage() {
     };
     load();
   }, [router]);
+
+  useEffect(() => {
+    const isMobile = window.innerWidth <= 768;
+    if (!isMobile) return;
+
+    const ua = navigator.userAgent || "";
+    const isIOS = /iPad|iPhone|iPod/.test(ua);
+    const isAndroid = /Android/.test(ua);
+    const isStandalone =
+      (window.navigator as any).standalone ||
+      window.matchMedia("(display-mode: standalone)").matches;
+
+    if (isStandalone) return;
+
+    if (isIOS) {
+      setA2hsText('Add to Home Screen: Tap "Share" then "Add to Home Screen".');
+      setShowA2hs(true);
+      return;
+    }
+
+    if (isAndroid) {
+      setA2hsText('Add to Home Screen: Tap "Menu" then "Add to Home screen".');
+      setShowA2hs(true);
+    }
+  }, []);
 
   const handleAdminLogin = async () => {
     setError(null);
@@ -146,6 +173,11 @@ export default function HomePage() {
             </button>
           </div>
         </section>
+        {showA2hs && (
+          <div className="a2hs-inline">
+            <span>{a2hsText}</span>
+          </div>
+        )}
       </div>
     </div>
   );
