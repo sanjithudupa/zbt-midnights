@@ -461,7 +461,7 @@ export default function UserLogging() {
     <div className="page">
       <header className="topbar">
         <div>
-          <h1>Midnights Log</h1>
+          <h1>ZBT Midnights Log</h1>
           <p className="muted">logging as {userName || "user"}</p>
         </div>
         <button className="ghost" onClick={handleLogout}>

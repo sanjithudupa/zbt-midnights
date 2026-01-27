@@ -928,7 +928,7 @@ export default function AdminDashboard() {
     <div className="page">
       <header className="topbar">
         <div>
-          <h1>Midnight Maker Admin</h1>
+          <h1>ZBT Midnight Maker Admin</h1>
         </div>
         <button className="ghost" onClick={handleLogout}>
           Log out

@@ -116,7 +116,7 @@ export default function HomePage() {
   return (
     <div className="page">
       <div className="panel">
-        <h1>Midnights Job Tracker</h1>
+        <h1>ZBT Midnights Job Tracker</h1>
 
         {error && <div className="error-banner">{error}</div>}
 
