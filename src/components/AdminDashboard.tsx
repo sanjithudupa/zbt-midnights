@@ -36,6 +36,8 @@ type WeekStatusRow = {
     id: string;
     submitted_at: string;
     user_id: string;
+    review_status?: string | null;
+    review_note?: string | null;
     users?: { id: string; username: string };
     submission_photos?: Array<{
       position: number;
@@ -55,6 +57,7 @@ type DetailModal = {
   submission: SubmissionItem | null;
   photos: Array<{ description: string; url: string | null }>;
   late: boolean;
+  adminEntry?: boolean;
 };
 
 type RequirementDraft = {
@@ -65,6 +68,13 @@ type RequirementDraft = {
 type PhotoViewerState = {
   photos: Array<{ description: string; url: string | null }>;
   index: number;
+};
+
+type AdminEntryModal = {
+  scheduledJobId: string;
+  jobName: string;
+  dayLabel: string;
+  requirements: Array<{ position: number; description: string }>;
 };
 
 type CleanupSummaryRow = {
@@ -240,6 +250,7 @@ export default function AdminDashboard() {
   const [error, setError] = useState<string | null>(null);
 
   const [newUserName, setNewUserName] = useState("");
+  const [bulkUserNames, setBulkUserNames] = useState("");
   const [newJobName, setNewJobName] = useState("");
 
   const [startDate, setStartDate] = useState(formatDateInput(new Date()));
@@ -252,6 +263,13 @@ export default function AdminDashboard() {
 
   const [detailModal, setDetailModal] = useState<DetailModal | null>(null);
   const [photoViewer, setPhotoViewer] = useState<PhotoViewerState | null>(null);
+  const [adminEntryModal, setAdminEntryModal] = useState<AdminEntryModal | null>(
+    null
+  );
+  const [adminEntryUserId, setAdminEntryUserId] = useState("");
+  const [adminEntryChecks, setAdminEntryChecks] = useState<
+    Array<{ position: number; checked: boolean }>
+  >([]);
   const [createWeekOpen, setCreateWeekOpen] = useState(false);
   const [createTemplateOpen, setCreateTemplateOpen] = useState(false);
   const [createTemplateName, setCreateTemplateName] = useState("");
@@ -434,6 +452,35 @@ export default function AdminDashboard() {
     loadUsers();
   };
 
+  const handleBulkCreateUsers = async () => {
+    setError(null);
+    const names = bulkUserNames
+      .split(",")
+      .map((name) => name.trim())
+      .filter(Boolean);
+    if (names.length === 0) {
+      setError("Enter at least one username.");
+      return;
+    }
+    const results = await Promise.all(
+      names.map(async (username) => {
+        const response = await fetch("/api/admin/users", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username }),
+        });
+        return { username, ok: response.ok };
+      })
+    );
+    const failed = results.filter((result) => !result.ok).map((r) => r.username);
+    if (failed.length > 0) {
+      setError(`Failed to add: ${failed.join(", ")}`);
+      return;
+    }
+    setBulkUserNames("");
+    loadUsers();
+  };
+
   const handleUserUpdate = async (user: User, updates: Partial<User>) => {
     const response = await fetch(`/api/admin/users/${user.id}`, {
       method: "PATCH",
@@ -453,6 +500,59 @@ export default function AdminDashboard() {
     });
     if (response.ok) {
       loadUsers();
+    }
+  };
+
+  const handleDeleteSubmission = async (submissionId: string) => {
+    const confirmed = window.confirm(
+      "Delete this job submission and its photos?"
+    );
+    if (!confirmed) return;
+    const response = await fetch(`/api/admin/submissions/${submissionId}`, {
+      method: "DELETE",
+    });
+    if (response.ok) {
+      setDetailModal(null);
+      if (selectedWeekId) {
+        loadWeekStatus(selectedWeekId);
+      }
+    }
+  };
+
+  const handleOpenAdminEntry = (payload: AdminEntryModal) => {
+    setAdminEntryModal(payload);
+    setAdminEntryUserId(users[0]?.id ?? "");
+    setAdminEntryChecks(
+      payload.requirements.map((req) => ({
+        position: req.position,
+        checked: false,
+      }))
+    );
+  };
+
+  const handleSaveAdminEntry = async () => {
+    if (!adminEntryModal) return;
+    if (!adminEntryUserId) {
+      setError("Select a user for this entry.");
+      return;
+    }
+    const response = await fetch("/api/admin/submissions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        scheduledJobId: adminEntryModal.scheduledJobId,
+        userId: adminEntryUserId,
+        checks: adminEntryChecks,
+      }),
+    });
+    if (!response.ok) {
+      const data = await response.json();
+      setError(data.error ?? "Failed to save admin entry.");
+      return;
+    }
+    setAdminEntryModal(null);
+    if (selectedWeekId) {
+      loadWeekStatus(selectedWeekId);
     }
   };
 
@@ -767,7 +867,8 @@ export default function AdminDashboard() {
       weekJobDefinitions.find((job) => job.id === jobId)?.name ??
       "Job";
 
-    const photos =
+    const adminEntry = submission.review_status === "admin";
+    let photos =
       submission.submission_photos
         ?.slice()
         .sort((a, b) => a.position - b.position)
@@ -775,6 +876,34 @@ export default function AdminDashboard() {
           description: photo.requirement_description_snapshot,
           url: photo.imgbb_url,
         })) ?? [];
+    if (adminEntry) {
+      const requirements =
+        rows[0]?.job_definitions?.job_requirements
+          ?.slice()
+          .sort((a, b) => a.position - b.position) ?? [];
+      const adminChecks = new Map<number, boolean>();
+      if (submission.review_note) {
+        try {
+          const parsed = JSON.parse(submission.review_note);
+          if (Array.isArray(parsed?.checks)) {
+            parsed.checks.forEach((entry: any) => {
+              adminChecks.set(
+                Number(entry.position),
+                Boolean(entry.checked)
+              );
+            });
+          }
+        } catch {
+          // ignore malformed JSON
+        }
+      }
+      photos = requirements.map((req) => ({
+        description: `${req.description} — ${
+          adminChecks.get(req.position) ? "Done" : "Missing"
+        }`,
+        url: null,
+      }));
+    }
 
     const late = isLateSubmission(submission.submitted_at, selectedWeek.start_date, day);
 
@@ -784,6 +913,7 @@ export default function AdminDashboard() {
       submission,
       photos,
       late,
+      adminEntry,
     });
   };
 
@@ -847,6 +977,7 @@ export default function AdminDashboard() {
             <label className="field">
               <span>Select week</span>
               <select
+                className="flat-select"
                 value={selectedWeekId}
                 onChange={(event) => setSelectedWeekId(event.target.value)}
               >
@@ -879,10 +1010,13 @@ export default function AdminDashboard() {
                         dayIndex
                       )
                     : false;
+                const adminEntry = latestSubmission?.review_status === "admin";
                 const statusClass = late
                   ? "late"
                   : isComplete
-                    ? "complete"
+                    ? adminEntry
+                      ? "complete-admin"
+                      : "complete"
                     : isOn
                       ? "scheduled"
                       : "not-scheduled";
@@ -892,12 +1026,26 @@ export default function AdminDashboard() {
                   <button
                     type="button"
                     className={`status-box ${statusClass}`}
-                    onClick={() =>
-                      isComplete && latestSubmission
-                        ? handleOpenDetail(dayIndex, jobId, latestSubmission)
-                        : undefined
-                    }
-                    disabled={!isComplete}
+                    onClick={() => {
+                      if (isComplete && latestSubmission) {
+                        handleOpenDetail(dayIndex, jobId, latestSubmission);
+                        return;
+                      }
+                      if (!isOn) return;
+                      const rows = statusMap.get(selectionKey(dayIndex, jobId)) ?? [];
+                      const requirements =
+                        rows[0]?.job_definitions?.job_requirements
+                          ?.slice()
+                          .sort((a, b) => a.position - b.position) ?? [];
+                      handleOpenAdminEntry({
+                        scheduledJobId: rows[0]?.id ?? "",
+                        jobName:
+                          weekJobDefinitions.find((job) => job.id === jobId)?.name ??
+                          "Job",
+                        dayLabel: FULL_DAY_LABELS[dayIndex],
+                        requirements,
+                      });
+                    }}
                   >
                     {text}
                   </button>
@@ -914,6 +1062,7 @@ export default function AdminDashboard() {
           <label className="field block-gap">
             <span>Select week</span>
             <select
+              className="flat-select"
               value={selectedWeekId}
               onChange={(event) => {
                 if (event.target.value === "__create__") {
@@ -940,6 +1089,7 @@ export default function AdminDashboard() {
                   {formatWeekRange(selectedWeek.start_date)}
                 </span>
                 <select
+                  className="flat-select"
                   value={applyTemplateId}
                   onChange={(event) => {
                     if (event.target.value === "__create_template__") {
@@ -1079,6 +1229,18 @@ export default function AdminDashboard() {
                 Add
               </button>
             </div>
+            <div className="list-row">
+              <textarea
+                className="input-grow"
+                placeholder="Add multiple users (comma separated)"
+                value={bulkUserNames}
+                onChange={(event) => setBulkUserNames(event.target.value)}
+                rows={2}
+              />
+              <button className="primary" onClick={handleBulkCreateUsers}>
+                Bulk Add
+              </button>
+            </div>
             {users.map((user) => (
               <div key={user.id} className="list-row">
                 <input
@@ -1168,6 +1330,7 @@ export default function AdminDashboard() {
               <label className="field">
                 <span>Template</span>
                 <select
+                  className="flat-select"
                   value={createTemplateId}
                   onChange={(event) => setCreateTemplateId(event.target.value)}
                 >
@@ -1248,6 +1411,7 @@ export default function AdminDashboard() {
             </div>
             <div className="row">
               <select
+                className="flat-select"
                 value={selectedTemplateId}
                 onChange={(event) => {
                   if (event.target.value === "__create_template__") {
@@ -1376,6 +1540,9 @@ export default function AdminDashboard() {
                   <span className={`badge ${detailModal.late ? "warning" : ""}`}>
                     {detailModal.submission.users?.username ?? "Submitted"}
                   </span>
+                  {detailModal.adminEntry && (
+                    <span className="badge">Admin entry</span>
+                  )}
                   <span className={`muted ${detailModal.late ? "warning" : ""}`}>
                     {new Date(detailModal.submission.submitted_at).toLocaleString(
                       undefined,
@@ -1395,23 +1562,107 @@ export default function AdminDashboard() {
                     <button
                       key={`${photo.description}-${index}`}
                       className="photo-card"
-                      onClick={() =>
-                        setPhotoViewer({ photos: detailModal.photos, index })
-                      }
+                      onClick={() => {
+                        if (!photo.url) return;
+                        setPhotoViewer({ photos: detailModal.photos, index });
+                      }}
+                      disabled={!photo.url}
                     >
                       <div className="muted">{photo.description}</div>
                       {photo.url ? (
                         <img src={photo.url} alt={photo.description} />
+                      ) : detailModal.adminEntry ? (
+                        <div className="muted">Marked by admin.</div>
                       ) : (
                         <div className="muted">No photo uploaded.</div>
                       )}
                     </button>
                   ))}
                 </div>
+                <button
+                  className="danger"
+                  onClick={() => handleDeleteSubmission(detailModal.submission!.id)}
+                >
+                  Delete job record
+                </button>
               </div>
             ) : (
               <div className="muted">No submission yet for this job.</div>
             )}
+          </div>
+        </div>
+      )}
+
+      {adminEntryModal && (
+        <div className="modal">
+          <div className="modal-card">
+            <div className="modal-header">
+              <div>
+                <h3>{adminEntryModal.jobName}</h3>
+                <p className="muted">{adminEntryModal.dayLabel}</p>
+              </div>
+              <button className="icon" onClick={() => setAdminEntryModal(null)}>
+                x
+              </button>
+            </div>
+            <div className="stack">
+              <label className="field">
+                <span>User</span>
+                <select
+                  className="flat-select"
+                  value={adminEntryUserId}
+                  onChange={(event) => setAdminEntryUserId(event.target.value)}
+                >
+                  <option value="">Select user</option>
+                  {users.map((user) => (
+                    <option key={user.id} value={user.id}>
+                      {user.username}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div className="stack">
+                <span className="muted">Required photos</span>
+                {adminEntryModal.requirements.length === 0 && (
+                  <div className="muted">No photo requirements.</div>
+                )}
+                {adminEntryModal.requirements.map((req) => {
+                  const checked =
+                    adminEntryChecks.find((item) => item.position === req.position)
+                      ?.checked ?? false;
+                  return (
+                    <label key={req.position} className="row">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() =>
+                          setAdminEntryChecks((prev) =>
+                            prev.map((entry) =>
+                              entry.position === req.position
+                                ? { ...entry, checked: !entry.checked }
+                                : entry
+                            )
+                          )
+                        }
+                      />
+                      <span>{req.description}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+            <div className="row">
+              <button className="ghost" onClick={() => setAdminEntryModal(null)}>
+                Cancel
+              </button>
+              <button
+                className="primary"
+                onClick={handleSaveAdminEntry}
+                disabled={!adminEntryUserId}
+              >
+                Save manual entry
+              </button>
+            </div>
           </div>
         </div>
       )}

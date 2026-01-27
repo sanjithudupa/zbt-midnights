@@ -17,6 +17,7 @@ export default function HomePage() {
   const [users, setUsers] = useState<PublicUser[]>([]);
   const [selectedUser, setSelectedUser] = useState<string>("");
   const [adminPassword, setAdminPassword] = useState("");
+  const [showAdminPassword, setShowAdminPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -97,8 +98,10 @@ export default function HomePage() {
           <label className="field">
             <span>Select user</span>
             <select
+              className="flat-select"
               value={selectedUser}
               onChange={(event) => setSelectedUser(event.target.value)}
+              style={{ width: "100%" }}
             >
               <option value="">Choose...</option>
               {users.map((user) => (
@@ -110,26 +113,38 @@ export default function HomePage() {
             </select>
           </label>
           {isAdminSelected && (
-            <label className="field">
+            <label className="field" style={{ marginTop: "8px" }}>
               <span>Admin password</span>
-              <input
-                type="password"
-                value={adminPassword}
-                onChange={(event) => setAdminPassword(event.target.value)}
-              />
+              <div className="row full nowrap">
+                <input
+                  className="input-grow"
+                  type={showAdminPassword ? "text" : "password"}
+                  value={adminPassword}
+                  onChange={(event) => setAdminPassword(event.target.value)}
+                />
+                <button
+                  type="button"
+                  className="ghost"
+                  onClick={() => setShowAdminPassword((prev) => !prev)}
+                >
+                  {showAdminPassword ? "Hide" : "Show"}
+                </button>
+              </div>
             </label>
           )}
-          <button
-            className="primary"
-            onClick={isAdminSelected ? handleAdminLogin : handleUserLogin}
-            disabled={
-              loading ||
-              !selectedUser ||
-              (isAdminSelected && adminPassword.length === 0)
-            }
-          >
-            Continue
-          </button>
+          <div className="cta-row">
+            <button
+              className="primary"
+              onClick={isAdminSelected ? handleAdminLogin : handleUserLogin}
+              disabled={
+                loading ||
+                !selectedUser ||
+                (isAdminSelected && adminPassword.length === 0)
+              }
+            >
+              Continue
+            </button>
+          </div>
         </section>
       </div>
     </div>

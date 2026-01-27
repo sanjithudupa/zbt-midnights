@@ -110,6 +110,18 @@ h3 {
   flex-wrap: wrap;
 }
 
+.row.nowrap {
+  flex-wrap: nowrap;
+}
+
+.row.full {
+  width: 100%;
+}
+
+.field .row.full {
+  width: 100%;
+}
+
 .field {
   display: flex;
   flex-direction: column;
@@ -122,6 +134,37 @@ textarea {
   border: 1px solid var(--border);
   padding: 8px 10px;
   background: #fff;
+}
+
+select.flat-select {
+  appearance: none;
+  background: #fff;
+  border: 1px solid var(--border);
+  padding: 10px 36px 10px 12px;
+  position: relative;
+  cursor: pointer;
+}
+
+select.flat-select:focus {
+  outline: none;
+}
+
+select.flat-select {
+  background-image: linear-gradient(45deg, transparent 50%, var(--text) 50%),
+    linear-gradient(135deg, var(--text) 50%, transparent 50%);
+  background-position: calc(100% - 18px) calc(50% - 2px),
+    calc(100% - 12px) calc(50% - 2px);
+  background-size: 6px 6px, 6px 6px;
+  background-repeat: no-repeat;
+}
+
+.input-grow {
+  flex: 1;
+  min-width: 0;
+}
+
+.cta-row {
+  margin-top: 12px;
 }
 
 textarea {
@@ -318,6 +361,12 @@ button:focus-visible {
 
 .status-box.complete {
   background: #22c55e;
+  color: #0f172a;
+  font-weight: 600;
+}
+
+.status-box.complete-admin {
+  background: #86efac;
   color: #0f172a;
   font-weight: 600;
 }
