@@ -868,7 +868,7 @@ export default function AdminDashboard() {
       "Job";
 
     const adminEntry = submission.review_status === "admin";
-    let photos =
+    let photos: Array<{ description: string; url: string | null }> =
       submission.submission_photos
         ?.slice()
         .sort((a, b) => a.position - b.position)
@@ -1021,6 +1021,7 @@ export default function AdminDashboard() {
                       ? "scheduled"
                       : "not-scheduled";
                 const text = isComplete ? label : isOn ? "--" : "";
+                const actionable = isOn && !isComplete;
 
                 return (
                   <button

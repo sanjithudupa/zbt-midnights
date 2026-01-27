@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { FULL_DAY_LABELS } from "@/lib/constants";
+import { DAY_LABELS } from "@/lib/constants";
 import { formatDateInput, getDayIndex, getMonday } from "@/lib/date";
 
 type WeekSummary = {
@@ -10,16 +10,22 @@ type WeekSummary = {
   start_date: string;
 };
 
-type ScheduledJob = {
+type WeekStatusRow = {
   id: string;
   day_of_week: number;
-  sort_order: number;
   job_definition_id: string;
   job_definitions?: {
     id: string;
     name: string;
     job_requirements?: Array<{ position: number; description: string }>;
   };
+  job_submissions?: Array<{
+    id: string;
+    submitted_at: string;
+    user_id: string;
+    review_status?: string | null;
+    users?: { id: string; username: string };
+  }>;
 };
 
 type Submission = {
@@ -45,6 +51,8 @@ type PhotoSlot = {
 type SessionResponse = {
   session: { role: "admin" | "user"; userId?: string } | null;
 };
+
+const selectionKey = (day: number, jobId: string) => `${day}:${jobId}`;
 
 async function compressImage(blob: Blob): Promise<Blob> {
   try {
@@ -72,7 +80,7 @@ export default function UserLogging() {
   const [weeks, setWeeks] = useState<WeekSummary[]>([]);
   const [selectedWeekId, setSelectedWeekId] = useState<string>("");
   const [selectedDay, setSelectedDay] = useState<number>(getDayIndex(new Date()));
-  const [schedule, setSchedule] = useState<ScheduledJob[]>([]);
+  const [statusRows, setStatusRows] = useState<WeekStatusRow[]>([]);
   const [selectedJobId, setSelectedJobId] = useState<string>("");
   const [photoSlots, setPhotoSlots] = useState<PhotoSlot[]>([]);
   const [skipRemaining, setSkipRemaining] = useState(false);
@@ -155,21 +163,21 @@ export default function UserLogging() {
 
   useEffect(() => {
     if (!selectedWeekId) return;
-    const loadSchedule = async () => {
+    const loadStatus = async () => {
       const response = await fetch(
-        `/api/user/schedule?weekId=${selectedWeekId}&day=${selectedDay}`
+        `/api/public/week-status?weekId=${selectedWeekId}`
       );
       if (!response.ok) return;
       const data = await response.json();
-      setSchedule(data.scheduledJobs ?? []);
+      setStatusRows(data.scheduledJobs ?? []);
       setSelectedJobId("");
       setPhotoSlots([]);
       setExistingSubmission(null);
       setSuccessOpen(false);
       setSkipRemaining(false);
     };
-    loadSchedule();
-  }, [selectedWeekId, selectedDay]);
+    loadStatus();
+  }, [selectedWeekId]);
 
   useEffect(() => {
     const loadSubmission = async () => {
@@ -188,7 +196,7 @@ export default function UserLogging() {
   }, [selectedJobId]);
 
   useEffect(() => {
-    const job = schedule.find((item) => item.id === selectedJobId);
+    const job = statusRows.find((item) => item.id === selectedJobId);
     if (!job) {
       setPhotoSlots([]);
       return;
@@ -202,12 +210,40 @@ export default function UserLogging() {
         description: requirement.description,
       }))
     );
-  }, [selectedJobId, schedule]);
+  }, [selectedJobId, statusRows]);
 
   const selectedJob = useMemo(
-    () => schedule.find((job) => job.id === selectedJobId),
-    [schedule, selectedJobId]
+    () => statusRows.find((job) => job.id === selectedJobId),
+    [statusRows, selectedJobId]
   );
+
+
+
+  const jobList = useMemo(() => {
+    const map = new Map<string, { id: string; name: string }>();
+    statusRows.forEach((row) => {
+      if (row.job_definitions?.id && !map.has(row.job_definitions.id)) {
+        map.set(row.job_definitions.id, {
+          id: row.job_definitions.id,
+          name: row.job_definitions.name,
+        });
+      }
+    });
+    return Array.from(map.values());
+  }, [statusRows]);
+
+  const statusMap = useMemo(() => {
+    const map = new Map<string, WeekStatusRow[]>();
+    statusRows.forEach((row) => {
+      const key = `${row.day_of_week}:${row.job_definition_id}`;
+      if (!map.has(key)) {
+        map.set(key, []);
+      }
+      map.get(key)?.push(row);
+    });
+    return map;
+  }, [statusRows]);
+
 
   const allUploaded =
     photoSlots.length === 0 ||
@@ -217,7 +253,7 @@ export default function UserLogging() {
   const canSubmit =
     !existingSubmission &&
     !isUploading &&
-    (allUploaded || (skipRemaining && anyUploaded));
+    (skipRemaining ? anyUploaded : allUploaded);
 
   const stopCamera = () => {
     streamRef.current?.getTracks().forEach((track) => track.stop());
@@ -436,55 +472,113 @@ export default function UserLogging() {
       {error && <div className="error-banner">{error}</div>}
 
       <section className="card">
-        <div className="grid-two">
-          <label className="field">
-            <span>Week</span>
-            <select
-              value={selectedWeekId}
-              onChange={(event) => setSelectedWeekId(event.target.value)}
-            >
-              <option value="">Select week</option>
-              {weeks.map((week) => (
-                <option key={week.id} value={week.id}>
-                  {week.start_date}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="field">
-            <span>Day</span>
-            <select
-              value={selectedDay}
-              onChange={(event) => setSelectedDay(Number(event.target.value))}
-            >
-              {FULL_DAY_LABELS.map((label, index) => (
-                <option key={label} value={index}>
-                  {label}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-
         <label className="field">
-          <span>Job</span>
+          <span>Week</span>
           <select
-            value={selectedJobId}
-            onChange={(event) => setSelectedJobId(event.target.value)}
+            className="flat-select"
+            value={selectedWeekId}
+            onChange={(event) => setSelectedWeekId(event.target.value)}
           >
-            <option value="">Select job</option>
-            {schedule.map((job) => (
-              <option key={job.id} value={job.id}>
-                {job.job_definitions?.name ?? "Job"}
+            <option value="">Select week</option>
+            {weeks.map((week) => (
+              <option key={week.id} value={week.id}>
+                {week.start_date}
               </option>
             ))}
           </select>
         </label>
+
+        <div className="stack">
+          <div className="muted" style={{ marginTop: "8px" }}>
+            Tap a white box to log that job.
+          </div>
+          <div className="grid-scroll">
+            <div className="grid-table">
+              <div className="grid-row">
+                <div className="grid-cell head">Job</div>
+                {DAY_LABELS.map((label) => (
+                  <div key={label} className="grid-cell head">
+                    {label}
+                  </div>
+                ))}
+              </div>
+              {jobList.map((job) => (
+                <div key={job.id} className="grid-row">
+                  <div className="grid-cell job-name">{job.name}</div>
+                  {DAY_LABELS.map((_, dayIndex) => {
+                    const key = selectionKey(dayIndex, job.id);
+                    const rows = statusMap.get(key) ?? [];
+                    const isOn = rows.length > 0;
+                    const submissions = rows.flatMap(
+                      (row) => row.job_submissions ?? []
+                    );
+                    const latestSubmission = submissions
+                      .slice()
+                      .sort(
+                        (a, b) =>
+                          new Date(b.submitted_at).getTime() -
+                          new Date(a.submitted_at).getTime()
+                      )[0];
+                    const isComplete = Boolean(latestSubmission);
+                    const adminEntry = latestSubmission?.review_status === "admin";
+                    const label = isComplete
+                      ? latestSubmission?.users?.username ?? ""
+                      : "";
+                    const statusClass = isComplete
+                      ? adminEntry
+                        ? "complete-admin"
+                        : "complete"
+                      : isOn
+                        ? "scheduled"
+                        : "not-scheduled";
+                    const text = isComplete ? label : isOn ? "--" : "";
+                    const actionable = isOn && !isComplete;
+                    const isSelected =
+                      actionable &&
+                      selectedJobId === rows[0]?.id &&
+                      selectedDay === dayIndex;
+                    return (
+                      <div key={key} className="grid-cell no-pad">
+                        <button
+                          type="button"
+                          className={`status-box ${statusClass} ${
+                            isSelected ? "selected-job" : ""
+                          }`}
+                          style={isSelected ? { background: "#dbeafe" } : undefined}
+                          onClick={() => {
+                            if (!actionable) return;
+                            const scheduled = rows[0];
+                            if (!scheduled) return;
+                            setSelectedDay(dayIndex);
+                            setSelectedJobId(scheduled.id);
+                          }}
+                          disabled={!actionable}
+                        >
+                          {text}
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="status-note">
+            <span className="status-note-item complete">completed job</span>
+            <span className="status-note-item complete-admin">
+              completed job logged by admin
+            </span>
+            <span className="status-note-item late">completed job late</span>
+            <span className="status-note-item selected">selected job</span>
+          </div>
+        </div>
       </section>
 
       {selectedJob && (
         <section className="card">
-          <h2>Add Photos</h2>
+          <h2>
+            Add Photos ({photoSlots.length})
+          </h2>
           {photoSlots.length === 0 && (
             <p className="muted">No photos required for this job.</p>
           )}
