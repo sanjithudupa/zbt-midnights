@@ -241,6 +241,15 @@ button:focus-visible {
   outline: none;
 }
 
+button.link {
+  border: none;
+  background: transparent;
+  padding: 0;
+  color: var(--accent);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
 .tabs {
   display: flex;
   gap: 8px;

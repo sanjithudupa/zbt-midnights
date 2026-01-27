@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { DAY_LABELS } from "@/lib/constants";
-import { formatDateInput, getDayIndex, getMonday } from "@/lib/date";
+import { formatDateInput, getDayIndex, getMonday, parseDateInput } from "@/lib/date";
 
 type WeekSummary = {
   id: string;
@@ -54,6 +54,18 @@ type SessionResponse = {
 };
 
 const selectionKey = (day: number, jobId: string) => `${day}:${jobId}`;
+
+function isLateSubmission(
+  submittedAt: string,
+  weekStartDate: string,
+  dayIndex: number
+) {
+  const start = parseDateInput(weekStartDate);
+  const cutoff = new Date(start);
+  cutoff.setDate(start.getDate() + dayIndex + 1);
+  cutoff.setHours(3, 0, 0, 0);
+  return new Date(submittedAt) > cutoff;
+}
 
 async function compressImage(blob: Blob): Promise<Blob> {
   try {
@@ -107,6 +119,7 @@ export default function UserLogging() {
     "environment"
   );
   const [torchSupported, setTorchSupported] = useState(false);
+  const [isStandalone, setIsStandalone] = useState(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
@@ -160,6 +173,13 @@ export default function UserLogging() {
       setUserName(match?.username ?? "");
     };
     loadUser();
+  }, []);
+
+  useEffect(() => {
+    const standalone =
+      (window.navigator as any).standalone ||
+      window.matchMedia("(display-mode: standalone)").matches;
+    setIsStandalone(Boolean(standalone));
   }, []);
 
   useEffect(() => {
@@ -240,6 +260,11 @@ export default function UserLogging() {
       return aOrder - bOrder || a.name.localeCompare(b.name);
     });
   }, [statusRows]);
+
+  const selectedWeek = useMemo(
+    () => weeks.find((week) => week.id === selectedWeekId),
+    [weeks, selectedWeekId]
+  );
 
   const statusMap = useMemo(() => {
     const map = new Map<string, WeekStatusRow[]>();
@@ -471,7 +496,18 @@ export default function UserLogging() {
       <header className="topbar">
         <div>
           <h1>ZBT Midnights Log</h1>
-          <p className="muted">logging as {userName || "user"}</p>
+          <p className="muted">
+            logging as {userName || "user"}
+            {isStandalone && (
+              <>
+                {" "}
+                ·{" "}
+                <button className="link" onClick={() => window.location.reload()}>
+                  refresh
+                </button>
+              </>
+            )}
+          </p>
         </div>
         <button className="ghost" onClick={handleLogout}>
           Log out
@@ -530,13 +566,26 @@ export default function UserLogging() {
                       )[0];
                     const isComplete = Boolean(latestSubmission);
                     const adminEntry = latestSubmission?.review_status === "admin";
+                    const late =
+                      isComplete &&
+                      selectedWeek &&
+                      latestSubmission &&
+                      !adminEntry
+                        ? isLateSubmission(
+                            latestSubmission.submitted_at,
+                            selectedWeek.start_date,
+                            dayIndex
+                          )
+                        : false;
                     const label = isComplete
                       ? latestSubmission?.users?.username ?? ""
                       : "";
                     const statusClass = isComplete
-                      ? adminEntry
-                        ? "complete-admin"
-                        : "complete"
+                      ? late
+                        ? "late"
+                        : adminEntry
+                          ? "complete-admin"
+                          : "complete"
                       : isOn
                         ? "scheduled"
                         : "not-scheduled";

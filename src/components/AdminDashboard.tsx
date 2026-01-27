@@ -305,6 +305,7 @@ export default function AdminDashboard() {
   });
   const [settingsPromptOpen, setSettingsPromptOpen] = useState(false);
   const [settingsMasterPassword, setSettingsMasterPassword] = useState("");
+  const [isStandalone, setIsStandalone] = useState(false);
 
   const changedSettingsCount = useMemo(() => {
     let count = 0;
@@ -384,6 +385,13 @@ export default function AdminDashboard() {
       ]);
     };
     loadAll();
+  }, []);
+
+  useEffect(() => {
+    const standalone =
+      (window.navigator as any).standalone ||
+      window.matchMedia("(display-mode: standalone)").matches;
+    setIsStandalone(Boolean(standalone));
   }, []);
 
   useEffect(() => {
@@ -968,7 +976,9 @@ export default function AdminDashboard() {
       }));
     }
 
-    const late = isLateSubmission(submission.submitted_at, selectedWeek.start_date, day);
+    const late =
+      submission.review_status !== "admin" &&
+      isLateSubmission(submission.submitted_at, selectedWeek.start_date, day);
 
     setDetailModal({
       jobName,
@@ -992,6 +1002,13 @@ export default function AdminDashboard() {
       <header className="topbar">
         <div>
           <h1>ZBT Midnight Maker Admin</h1>
+          {isStandalone && (
+            <div className="muted">
+              <button className="link" onClick={() => window.location.reload()}>
+                refresh
+              </button>
+            </div>
+          )}
         </div>
         <button className="ghost" onClick={handleLogout}>
           Log out
@@ -1066,7 +1083,8 @@ export default function AdminDashboard() {
                 const late =
                   isComplete &&
                   selectedWeek &&
-                  latestSubmission
+                  latestSubmission &&
+                  latestSubmission.review_status !== "admin"
                     ? isLateSubmission(
                         latestSubmission.submitted_at,
                         selectedWeek.start_date,
