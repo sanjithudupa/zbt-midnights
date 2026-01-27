@@ -30,6 +30,7 @@ type WeekStatusRow = {
   job_definitions?: {
     id: string;
     name: string;
+    sort_order?: number;
     job_requirements?: Array<{ position: number; description: string }>;
   };
   job_submissions?: Array<{
@@ -109,6 +110,26 @@ const IconRestore = () => (
     <path d="M4 4v6h6" strokeWidth="2" />
     <path d="M20 20v-6h-6" strokeWidth="2" />
     <path d="M20 8a8 8 0 0 0-14.8-4M4 16a8 8 0 0 0 14.8 4" strokeWidth="2" />
+  </svg>
+);
+
+const IconArrowUp = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+    <path d="M12 5v14" strokeWidth="2" />
+    <path d="M6 11l6-6 6 6" strokeWidth="2" />
+  </svg>
+);
+
+const IconArrowDown = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+    <path d="M12 19V5" strokeWidth="2" />
+    <path d="M6 13l6 6 6-6" strokeWidth="2" />
+  </svg>
+);
+
+const IconDrag = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+    <path d="M7 5h10M7 12h10M7 19h10" strokeWidth="2" />
   </svg>
 );
 
@@ -252,6 +273,7 @@ export default function AdminDashboard() {
   const [newUserName, setNewUserName] = useState("");
   const [bulkUserNames, setBulkUserNames] = useState("");
   const [newJobName, setNewJobName] = useState("");
+  const [dragJobIndex, setDragJobIndex] = useState<number | null>(null);
 
   const [startDate, setStartDate] = useState(formatDateInput(new Date()));
   const [createTemplateId, setCreateTemplateId] = useState<string>("");
@@ -304,18 +326,34 @@ export default function AdminDashboard() {
   const activeJobDefinitions = useMemo(() => {
     return jobDefinitions
       .slice()
-      .sort((a, b) => a.name.localeCompare(b.name));
+      .sort(
+        (a, b) =>
+          (a.sort_order ?? 0) - (b.sort_order ?? 0) ||
+          a.name.localeCompare(b.name)
+      );
   }, [jobDefinitions]);
 
+  const orderedJobDefinitions = activeJobDefinitions;
+
   const weekJobDefinitions = useMemo(() => {
-    const map = new Map<string, string>();
+    const map = new Map<string, { name: string; sort_order?: number }>();
     statusRows.forEach((row) => {
       if (row.job_definitions?.name) {
-        map.set(row.job_definition_id, row.job_definitions.name);
+        map.set(row.job_definition_id, {
+          name: row.job_definitions.name,
+          sort_order: row.job_definitions.sort_order,
+        });
       }
     });
-    const list = Array.from(map.entries()).map(([id, name]) => ({ id, name }));
-    list.sort((a, b) => a.name.localeCompare(b.name));
+    const list = Array.from(map.entries()).map(([id, meta]) => ({
+      id,
+      name: meta.name,
+      sort_order: meta.sort_order,
+    }));
+    list.sort(
+      (a, b) =>
+        (a.sort_order ?? 0) - (b.sort_order ?? 0) || a.name.localeCompare(b.name)
+    );
     return list;
   }, [statusRows]);
 
@@ -588,6 +626,31 @@ export default function AdminDashboard() {
     setRequirementInput("");
     setJobEditorOpen(true);
     loadJobDefinitions();
+  };
+
+  const handleReorderJobs = async (ordered: JobDefinition[]) => {
+    const normalized = ordered.map((job, index) => ({
+      ...job,
+      sort_order: index,
+    }));
+    setJobDefinitions(normalized);
+    const response = await fetch("/api/admin/job-definitions/order", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ orderedIds: normalized.map((job) => job.id) }),
+    });
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      setError(
+        data.details
+          ? `${data.error ?? "Failed to reorder jobs."} (${data.details})`
+          : data.error ?? "Failed to reorder jobs."
+      );
+      loadJobDefinitions();
+      return;
+    }
+    await response.json().catch(() => ({}));
+    await loadJobDefinitions();
   };
 
   const handleJobUpdate = async (
@@ -1193,14 +1256,34 @@ export default function AdminDashboard() {
                 Add Job
               </button>
             </div>
-            {jobDefinitions.map((job) => (
-              <div key={job.id} className="list-row">
+            {orderedJobDefinitions.map((job, index) => (
+              <div
+                key={job.id}
+                className="list-row"
+                draggable
+                onDragStart={() => setDragJobIndex(index)}
+                onDragOver={(event) => {
+                  event.preventDefault();
+                }}
+                onDrop={() => {
+                  if (dragJobIndex === null || dragJobIndex === index) return;
+                  const next = orderedJobDefinitions.slice();
+                  const [moved] = next.splice(dragJobIndex, 1);
+                  next.splice(index, 0, moved);
+                  setDragJobIndex(null);
+                  handleReorderJobs(next);
+                }}
+                onDragEnd={() => setDragJobIndex(null)}
+              >
                 <div className="stack">
                   <strong>{job.name}</strong>
                   <span className="muted">
                     {(job.job_requirements ?? []).length} photos required
                   </span>
                 </div>
+                <button className="icon drag-handle" title="Drag to reorder">
+                  <IconDrag />
+                </button>
                 <button className="icon" onClick={() => handleOpenJobEditor(job)}>
                   <IconEdit />
                 </button>

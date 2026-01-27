@@ -17,6 +17,7 @@ type WeekStatusRow = {
   job_definitions?: {
     id: string;
     name: string;
+    sort_order?: number;
     job_requirements?: Array<{ position: number; description: string }>;
   };
   job_submissions?: Array<{
@@ -229,7 +230,15 @@ export default function UserLogging() {
         });
       }
     });
-    return Array.from(map.values());
+    return Array.from(map.values()).sort((a, b) => {
+      const aOrder =
+        statusRows.find((row) => row.job_definitions?.id === a.id)
+          ?.job_definitions?.sort_order ?? 0;
+      const bOrder =
+        statusRows.find((row) => row.job_definitions?.id === b.id)
+          ?.job_definitions?.sort_order ?? 0;
+      return aOrder - bOrder || a.name.localeCompare(b.name);
+    });
   }, [statusRows]);
 
   const statusMap = useMemo(() => {

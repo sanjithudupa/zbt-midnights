@@ -10,8 +10,9 @@ export async function GET() {
   const { data, error } = await supabase
     .from("job_definitions")
     .select(
-      "id, name, created_at, job_requirements ( id, position, description )"
+      "id, name, created_at, sort_order, job_requirements ( id, position, description )"
     )
+    .order("sort_order", { ascending: true })
     .order("created_at", { ascending: false });
 
   if (error) {
@@ -34,10 +35,19 @@ export async function POST(request: Request) {
   }
 
   const supabase = getServiceSupabase();
+  const { data: last } = await supabase
+    .from("job_definitions")
+    .select("sort_order")
+    .order("sort_order", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  const nextOrder = (last?.sort_order ?? -1) + 1;
+
   const { data, error } = await supabase
     .from("job_definitions")
-    .insert({ name: name.trim() })
-    .select("id, name, created_at")
+    .insert({ name: name.trim(), sort_order: nextOrder })
+    .select("id, name, created_at, sort_order")
     .single();
 
   if (error) {

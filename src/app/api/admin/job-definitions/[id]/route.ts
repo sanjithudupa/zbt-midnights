@@ -10,11 +10,14 @@ export async function PATCH(
   if (unauthorized) return unauthorized;
 
   const { id } = await params;
-  const { name } = await request.json();
+  const { name, sort_order } = await request.json();
 
   const updates: Record<string, unknown> = {};
   if (typeof name === "string" && name.trim()) {
     updates.name = name.trim();
+  }
+  if (typeof sort_order === "number" && Number.isFinite(sort_order)) {
+    updates.sort_order = sort_order;
   }
   if (!Object.keys(updates).length) {
     return NextResponse.json({ error: "No changes provided." }, { status: 400 });

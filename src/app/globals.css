@@ -213,11 +213,24 @@ label.ghost {
   background: transparent;
 }
 
+button.ghost {
+  border: 1px solid var(--border);
+  padding: 6px 8px;
+}
+
 button.icon {
   padding: 0;
   border: none;
   background: transparent;
   font-size: 1rem;
+}
+
+button.icon.drag-handle {
+  cursor: grab;
+}
+
+button.icon.drag-handle:active {
+  cursor: grabbing;
 }
 
 button:focus {

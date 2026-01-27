@@ -8,6 +8,7 @@ export type JobDefinition = {
   id: string;
   name: string;
   created_at: string;
+  sort_order?: number;
 };
 
 export type JobRequirement = {
