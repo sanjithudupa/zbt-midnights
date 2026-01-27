@@ -563,14 +563,6 @@ export default function UserLogging() {
               ))}
             </div>
           </div>
-          <div className="status-note">
-            <span className="status-note-item complete">completed job</span>
-            <span className="status-note-item complete-admin">
-              completed job logged by admin
-            </span>
-            <span className="status-note-item late">completed job late</span>
-            <span className="status-note-item selected">selected job</span>
-          </div>
         </div>
       </section>
 
