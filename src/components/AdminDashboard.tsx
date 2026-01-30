@@ -46,6 +46,11 @@ type WeekStatusRow = {
       requirement_description_snapshot: string;
     }>;
   }>;
+  job_punts?: Array<{
+    scheduled_job_id: string;
+    user_id: string;
+    users?: { id: string; username: string };
+  }>;
 };
 
 type SubmissionItem = NonNullable<WeekStatusRow["job_submissions"]>[number];
@@ -76,6 +81,7 @@ type AdminEntryModal = {
   jobName: string;
   dayLabel: string;
   requirements: Array<{ position: number; description: string }>;
+  puntUserId?: string | null;
 };
 
 type CleanupSummaryRow = {
@@ -292,6 +298,8 @@ export default function AdminDashboard() {
   const [adminEntryChecks, setAdminEntryChecks] = useState<
     Array<{ position: number; checked: boolean }>
   >([]);
+  const [adminEntryMode, setAdminEntryMode] = useState<"log" | "punt">("log");
+  const [puntUserId, setPuntUserId] = useState("");
   const [createWeekOpen, setCreateWeekOpen] = useState(false);
   const [createTemplateOpen, setCreateTemplateOpen] = useState(false);
   const [createTemplateName, setCreateTemplateName] = useState("");
@@ -568,6 +576,8 @@ export default function AdminDashboard() {
   const handleOpenAdminEntry = (payload: AdminEntryModal) => {
     setAdminEntryModal(payload);
     setAdminEntryUserId(users[0]?.id ?? "");
+    setPuntUserId(payload.puntUserId ?? users[0]?.id ?? "");
+    setAdminEntryMode("log");
     setAdminEntryChecks(
       payload.requirements.map((req) => ({
         position: req.position,
@@ -594,6 +604,48 @@ export default function AdminDashboard() {
     if (!response.ok) {
       const data = await response.json();
       setError(data.error ?? "Failed to save admin entry.");
+      return;
+    }
+    setAdminEntryModal(null);
+    if (selectedWeekId) {
+      loadWeekStatus(selectedWeekId);
+    }
+  };
+
+  const handleSavePunt = async () => {
+    if (!adminEntryModal) return;
+    if (!puntUserId) {
+      setError("Select a user for the punt.");
+      return;
+    }
+    const response = await fetch("/api/admin/punts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        scheduledJobId: adminEntryModal.scheduledJobId,
+        userId: puntUserId,
+      }),
+    });
+    if (!response.ok) {
+      const data = await response.json();
+      setError(data.error ?? "Failed to save punt.");
+      return;
+    }
+    setAdminEntryModal(null);
+    if (selectedWeekId) {
+      loadWeekStatus(selectedWeekId);
+    }
+  };
+
+  const handleClearPunt = async () => {
+    if (!adminEntryModal) return;
+    const response = await fetch(
+      `/api/admin/punts?scheduledJobId=${adminEntryModal.scheduledJobId}`,
+      { method: "DELETE" }
+    );
+    if (!response.ok) {
+      const data = await response.json();
+      setError(data.error ?? "Failed to clear punt.");
       return;
     }
     setAdminEntryModal(null);
@@ -1102,6 +1154,11 @@ export default function AdminDashboard() {
                       ? "scheduled"
                       : "not-scheduled";
                 const text = isComplete ? label : isOn ? "--" : "";
+                const puntName = statusMap
+                  .get(selectionKey(dayIndex, jobId))
+                  ?.flatMap((row) => row.job_punts ?? [])
+                  .map((punt) => punt.users?.username)
+                  .find(Boolean);
                 const actionable = isOn && !isComplete;
 
                 return (
@@ -1119,6 +1176,10 @@ export default function AdminDashboard() {
                         rows[0]?.job_definitions?.job_requirements
                           ?.slice()
                           .sort((a, b) => a.position - b.position) ?? [];
+                      const puntUserId =
+                        rows[0]?.job_punts?.[0]?.users?.id ??
+                        rows[0]?.job_punts?.[0]?.user_id ??
+                        null;
                       handleOpenAdminEntry({
                         scheduledJobId: rows[0]?.id ?? "",
                         jobName:
@@ -1126,10 +1187,16 @@ export default function AdminDashboard() {
                           "Job",
                         dayLabel: FULL_DAY_LABELS[dayIndex],
                         requirements,
+                        puntUserId,
                       });
                     }}
                   >
-                    {text}
+                    <div className="stack">
+                      <div>{text}</div>
+                      {puntName && (
+                        <div className="text-danger">{puntName} punt</div>
+                      )}
+                    </div>
                   </button>
                 );
               }}
@@ -1707,64 +1774,116 @@ export default function AdminDashboard() {
                 x
               </button>
             </div>
-            <div className="stack">
-              <label className="field">
-                <span>User</span>
-                <select
-                  className="flat-select"
-                  value={adminEntryUserId}
-                  onChange={(event) => setAdminEntryUserId(event.target.value)}
-                >
-                  <option value="">Select user</option>
-                  {users.map((user) => (
-                    <option key={user.id} value={user.id}>
-                      {user.username}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <div className="stack">
-                <span className="muted">Required photos</span>
-                {adminEntryModal.requirements.length === 0 && (
-                  <div className="muted">No photo requirements.</div>
-                )}
-                {adminEntryModal.requirements.map((req) => {
-                  const checked =
-                    adminEntryChecks.find((item) => item.position === req.position)
-                      ?.checked ?? false;
-                  return (
-                    <label key={req.position} className="row">
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={() =>
-                          setAdminEntryChecks((prev) =>
-                            prev.map((entry) =>
-                              entry.position === req.position
-                                ? { ...entry, checked: !entry.checked }
-                                : entry
-                            )
-                          )
-                        }
-                      />
-                      <span>{req.description}</span>
-                    </label>
-                  );
-                })}
-              </div>
-            </div>
             <div className="row">
-              <button className="ghost" onClick={() => setAdminEntryModal(null)}>
-                Cancel
+              <button
+                className={adminEntryMode === "log" ? "tab active" : "tab"}
+                onClick={() => setAdminEntryMode("log")}
+              >
+                Manual log
               </button>
               <button
-                className="primary"
-                onClick={handleSaveAdminEntry}
-                disabled={!adminEntryUserId}
+                className={adminEntryMode === "punt" ? "tab active" : "tab"}
+                onClick={() => setAdminEntryMode("punt")}
               >
-                Save manual entry
+                Punt
               </button>
             </div>
+            {adminEntryMode === "log" ? (
+              <>
+                <div className="stack">
+                  <label className="field">
+                    <span>User</span>
+                    <select
+                      className="flat-select"
+                      value={adminEntryUserId}
+                      onChange={(event) => setAdminEntryUserId(event.target.value)}
+                    >
+                      <option value="">Select user</option>
+                      {users.map((user) => (
+                        <option key={user.id} value={user.id}>
+                          {user.username}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <div className="stack">
+                    <span className="muted">Required photos</span>
+                    {adminEntryModal.requirements.length === 0 && (
+                      <div className="muted">No photo requirements.</div>
+                    )}
+                    {adminEntryModal.requirements.map((req) => {
+                      const checked =
+                        adminEntryChecks.find(
+                          (item) => item.position === req.position
+                        )?.checked ?? false;
+                      return (
+                        <label key={req.position} className="row">
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() =>
+                              setAdminEntryChecks((prev) =>
+                                prev.map((entry) =>
+                                  entry.position === req.position
+                                    ? { ...entry, checked: !entry.checked }
+                                    : entry
+                                )
+                              )
+                            }
+                          />
+                          <span>{req.description}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+                <div className="row">
+                  <button className="ghost" onClick={() => setAdminEntryModal(null)}>
+                    Cancel
+                  </button>
+                  <button
+                    className="primary"
+                    onClick={handleSaveAdminEntry}
+                    disabled={!adminEntryUserId}
+                  >
+                    Save manual entry
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <label className="field">
+                  <span>Punt user</span>
+                  <select
+                    className="flat-select"
+                    value={puntUserId}
+                    onChange={(event) => setPuntUserId(event.target.value)}
+                  >
+                    <option value="">Select user</option>
+                    {users.map((user) => (
+                      <option key={user.id} value={user.id}>
+                        {user.username}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <div className="row">
+                  <button className="ghost" onClick={() => setAdminEntryModal(null)}>
+                    Cancel
+                  </button>
+                  <button className="ghost" onClick={handleClearPunt}>
+                    Clear punt
+                  </button>
+                  <button
+                    className="primary"
+                    onClick={handleSavePunt}
+                    disabled={!puntUserId}
+                  >
+                    Save punt
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
