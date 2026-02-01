@@ -9,11 +9,13 @@ export async function GET() {
 
   const adminPasswordHash = await getAdminSetting("admin_password_hash");
   const imgbbKey = await getAdminSetting("imgbb_api_key");
+  const googleSheetUrl = await getAdminSetting("google_sheet_url");
 
   return NextResponse.json({
     settings: {
       hasAdminPassword: Boolean(adminPasswordHash),
       hasImgbbKey: Boolean(imgbbKey),
+      hasGoogleSheetUrl: Boolean(googleSheetUrl),
     },
   });
 }
@@ -23,7 +25,7 @@ export async function POST(request: Request) {
   if (unauthorized) return unauthorized;
 
   const body = await request.json();
-  const { adminPassword, imgbbApiKey, masterPassword } = body ?? {};
+  const { adminPassword, imgbbApiKey, masterPassword, googleSheetUrl } = body ?? {};
   const master = process.env.ADMIN_UPDATE_MASTER_PASSWORD;
   if (!master || masterPassword !== master) {
     return NextResponse.json(
@@ -39,6 +41,10 @@ export async function POST(request: Request) {
 
   if (typeof imgbbApiKey === "string" && imgbbApiKey.trim()) {
     await setAdminSetting("imgbb_api_key", imgbbApiKey.trim());
+  }
+
+  if (typeof googleSheetUrl === "string" && googleSheetUrl.trim()) {
+    await setAdminSetting("google_sheet_url", googleSheetUrl.trim());
   }
 
   return NextResponse.json({ ok: true });

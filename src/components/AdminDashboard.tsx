@@ -310,6 +310,7 @@ export default function AdminDashboard() {
   const [settingsDraft, setSettingsDraft] = useState({
     adminPassword: "",
     imgbbApiKey: "",
+    googleSheetUrl: "",
   });
   const [settingsPromptOpen, setSettingsPromptOpen] = useState(false);
   const [settingsMasterPassword, setSettingsMasterPassword] = useState("");
@@ -319,6 +320,7 @@ export default function AdminDashboard() {
     let count = 0;
     if (settingsDraft.adminPassword.trim()) count += 1;
     if (settingsDraft.imgbbApiKey.trim()) count += 1;
+    if (settingsDraft.googleSheetUrl.trim()) count += 1;
     return count;
   }, [settingsDraft]);
 
@@ -406,11 +408,14 @@ export default function AdminDashboard() {
     if (selectedWeekId) {
       loadWeekStatus(selectedWeekId);
       loadCleanupSummary();
+      if (tab === "overview") {
+        fetch(`/api/sheets/week?weekId=${selectedWeekId}`).catch(() => null);
+      }
     } else {
       setStatusRows([]);
       setWeekSelections({});
     }
-  }, [selectedWeekId]);
+  }, [selectedWeekId, tab]);
 
   useEffect(() => {
     if (!selectedTemplateId) {
@@ -964,6 +969,7 @@ export default function AdminDashboard() {
       body: JSON.stringify({
         adminPassword: settingsDraft.adminPassword.trim() || undefined,
         imgbbApiKey: settingsDraft.imgbbApiKey.trim() || undefined,
+        googleSheetUrl: settingsDraft.googleSheetUrl.trim() || undefined,
         masterPassword: settingsMasterPassword,
       }),
     });
@@ -972,7 +978,7 @@ export default function AdminDashboard() {
       return;
     }
     setSettingsStatus("Settings updated.");
-    setSettingsDraft({ adminPassword: "", imgbbApiKey: "" });
+    setSettingsDraft({ adminPassword: "", imgbbApiKey: "", googleSheetUrl: "" });
     setSettingsMasterPassword("");
     setSettingsPromptOpen(false);
     loadSettingsFlags();
@@ -1463,6 +1469,22 @@ export default function AdminDashboard() {
                   setSettingsDraft((prev) => ({
                     ...prev,
                     imgbbApiKey: event.target.value,
+                  }))
+                }
+              />
+            </label>
+            <label className="field">
+              <span>
+                Google Sheet URL{settingsDraft.googleSheetUrl.trim() ? " *" : ""}
+              </span>
+              <input
+                type="text"
+                placeholder="Update Google Sheet URL"
+                value={settingsDraft.googleSheetUrl}
+                onChange={(event) =>
+                  setSettingsDraft((prev) => ({
+                    ...prev,
+                    googleSheetUrl: event.target.value,
                   }))
                 }
               />

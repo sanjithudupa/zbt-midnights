@@ -198,6 +198,7 @@ export default function UserLogging() {
       setSkipRemaining(false);
     };
     loadStatus();
+    fetch(`/api/sheets/week?weekId=${selectedWeekId}`).catch(() => null);
   }, [selectedWeekId]);
 
   useEffect(() => {
