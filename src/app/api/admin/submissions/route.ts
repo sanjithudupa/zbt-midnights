@@ -1,6 +1,13 @@
 import { NextResponse } from "next/server";
 import { getServiceSupabase } from "@/lib/supabaseServer";
 import { requireAdmin } from "@/lib/auth";
+import { getAdminSetting } from "@/lib/adminSettings";
+import { parseDateInput } from "@/lib/date";
+import {
+  extractSpreadsheetId,
+  formatWeekTab,
+  updateSingleStatusCell,
+} from "@/lib/googleSheets";
 
 type AdminCheck = { position: number; checked: boolean };
 
@@ -71,6 +78,7 @@ export async function POST(request: Request) {
     scheduled_job_id: scheduledJobId,
     user_id: userId,
     review_status: "admin",
+    verified_by_admin: true,
     review_note: reviewNote,
   });
 
@@ -85,6 +93,33 @@ export async function POST(request: Request) {
       { error: "Failed to save admin submission." },
       { status: 500 }
     );
+  }
+
+  const sheetUrl = await getAdminSetting("google_sheet_url");
+  if (sheetUrl) {
+    const spreadsheetId = extractSpreadsheetId(sheetUrl);
+    if (spreadsheetId) {
+      const { data: scheduled } = await supabase
+        .from("scheduled_jobs")
+        .select(
+          "day_of_week, job_definition_id, weeks ( start_date ), job_definitions ( sort_order )"
+        )
+        .eq("id", scheduledJobId)
+        .single();
+
+      if (scheduled?.weeks?.start_date) {
+        const startDate = parseDateInput(scheduled.weeks.start_date);
+        const tabName = formatWeekTab(startDate);
+        const rowIndex = scheduled.job_definitions?.sort_order ?? 0;
+        await updateSingleStatusCell({
+          spreadsheetId,
+          tabName,
+          dayIndex: scheduled.day_of_week,
+          rowIndex,
+          value: "V",
+        });
+      }
+    }
   }
 
   return NextResponse.json({ ok: true });

@@ -56,6 +56,7 @@ export type Submission = {
   note: string | null;
   review_status: string | null;
   review_note: string | null;
+  verified_by_admin: boolean | null;
   reviewed_at: string | null;
   reviewed_by: string | null;
 };

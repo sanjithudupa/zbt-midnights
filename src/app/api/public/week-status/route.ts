@@ -16,7 +16,7 @@ export async function GET(request: Request) {
   const { data, error } = await supabase
     .from("scheduled_jobs")
     .select(
-      "id, day_of_week, sort_order, job_definition_id, job_definitions ( id, name, sort_order, job_requirements ( position, description ) ), job_punts ( scheduled_job_id, user_id, users!job_punts_user_id_fkey ( id, username ) ), job_submissions ( id, submitted_at, user_id, review_status, users!job_submissions_user_id_fkey ( id, username ) )"
+      "id, day_of_week, sort_order, job_definition_id, job_definitions ( id, name, sort_order, job_requirements ( position, description ) ), job_punts ( scheduled_job_id, user_id, users!job_punts_user_id_fkey ( id, username ) ), job_submissions ( id, submitted_at, user_id, review_status, verified_by_admin, users!job_submissions_user_id_fkey ( id, username ) )"
     )
     .eq("week_id", weekId)
     .order("day_of_week", { ascending: true })
@@ -29,5 +29,13 @@ export async function GET(request: Request) {
     );
   }
 
-  return NextResponse.json({ scheduledJobs: data ?? [] });
+  const { data: jobDefinitions } = await supabase
+    .from("job_definitions")
+    .select("id, name, sort_order")
+    .order("sort_order", { ascending: true });
+
+  return NextResponse.json({
+    scheduledJobs: data ?? [],
+    jobDefinitions: jobDefinitions ?? [],
+  });
 }

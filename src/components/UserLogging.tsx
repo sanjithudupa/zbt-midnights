@@ -3,11 +3,17 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { DAY_LABELS } from "@/lib/constants";
-import { formatDateInput, getDayIndex, getMonday, parseDateInput } from "@/lib/date";
+import { formatDateInput, getDayIndex, getMonday } from "@/lib/date";
 
 type WeekSummary = {
   id: string;
   start_date: string;
+};
+
+type JobDefinitionSummary = {
+  id: string;
+  name: string;
+  sort_order?: number;
 };
 
 type WeekStatusRow = {
@@ -25,6 +31,12 @@ type WeekStatusRow = {
     submitted_at: string;
     user_id: string;
     review_status?: string | null;
+    verified_by_admin?: boolean | null;
+    users?: { id: string; username: string };
+  }>;
+  job_punts?: Array<{
+    scheduled_job_id: string;
+    user_id: string;
     users?: { id: string; username: string };
   }>;
 };
@@ -55,17 +67,12 @@ type SessionResponse = {
 
 const selectionKey = (day: number, jobId: string) => `${day}:${jobId}`;
 
-function isLateSubmission(
-  submittedAt: string,
-  weekStartDate: string,
-  dayIndex: number
-) {
-  const start = parseDateInput(weekStartDate);
-  const cutoff = new Date(start);
-  cutoff.setDate(start.getDate() + dayIndex + 1);
-  cutoff.setHours(3, 0, 0, 0);
-  return new Date(submittedAt) > cutoff;
-}
+const toFirstLower = (value?: string | null) => {
+  if (!value) return "";
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  return trimmed.split(/\s+/)[0].toLowerCase();
+};
 
 async function compressImage(blob: Blob): Promise<Blob> {
   try {
@@ -94,6 +101,7 @@ export default function UserLogging() {
   const [selectedWeekId, setSelectedWeekId] = useState<string>("");
   const [selectedDay, setSelectedDay] = useState<number>(getDayIndex(new Date()));
   const [statusRows, setStatusRows] = useState<WeekStatusRow[]>([]);
+  const [jobDefinitions, setJobDefinitions] = useState<JobDefinitionSummary[]>([]);
   const [selectedJobId, setSelectedJobId] = useState<string>("");
   const [photoSlots, setPhotoSlots] = useState<PhotoSlot[]>([]);
   const [skipRemaining, setSkipRemaining] = useState(false);
@@ -120,6 +128,8 @@ export default function UserLogging() {
   );
   const [torchSupported, setTorchSupported] = useState(false);
   const [isStandalone, setIsStandalone] = useState(false);
+  const [sheetSignups, setSheetSignups] = useState<string[][]>([]);
+  const [sheetStatuses, setSheetStatuses] = useState<string[][]>([]);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
@@ -191,6 +201,7 @@ export default function UserLogging() {
       if (!response.ok) return;
       const data = await response.json();
       setStatusRows(data.scheduledJobs ?? []);
+      setJobDefinitions(data.jobDefinitions ?? []);
       setSelectedJobId("");
       setPhotoSlots([]);
       setExistingSubmission(null);
@@ -198,7 +209,17 @@ export default function UserLogging() {
       setSkipRemaining(false);
     };
     loadStatus();
-    fetch(`/api/sheets/week?weekId=${selectedWeekId}`).catch(() => null);
+    fetch(`/api/sheets/week?weekId=${selectedWeekId}`)
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data) => {
+        if (data?.signups) {
+          setSheetSignups(data.signups);
+        }
+        if (data?.statuses) {
+          setSheetStatuses(data.statuses);
+        }
+      })
+      .catch(() => null);
   }, [selectedWeekId]);
 
   useEffect(() => {
@@ -242,30 +263,15 @@ export default function UserLogging() {
 
 
   const jobList = useMemo(() => {
-    const map = new Map<string, { id: string; name: string }>();
-    statusRows.forEach((row) => {
-      if (row.job_definitions?.id && !map.has(row.job_definitions.id)) {
-        map.set(row.job_definitions.id, {
-          id: row.job_definitions.id,
-          name: row.job_definitions.name,
-        });
-      }
-    });
-    return Array.from(map.values()).sort((a, b) => {
-      const aOrder =
-        statusRows.find((row) => row.job_definitions?.id === a.id)
-          ?.job_definitions?.sort_order ?? 0;
-      const bOrder =
-        statusRows.find((row) => row.job_definitions?.id === b.id)
-          ?.job_definitions?.sort_order ?? 0;
-      return aOrder - bOrder || a.name.localeCompare(b.name);
-    });
-  }, [statusRows]);
+    return jobDefinitions
+      .slice()
+      .sort(
+        (a, b) =>
+          (a.sort_order ?? 0) - (b.sort_order ?? 0) ||
+          a.name.localeCompare(b.name)
+      );
+  }, [jobDefinitions]);
 
-  const selectedWeek = useMemo(
-    () => weeks.find((week) => week.id === selectedWeekId),
-    [weeks, selectedWeekId]
-  );
 
   const statusMap = useMemo(() => {
     const map = new Map<string, WeekStatusRow[]>();
@@ -548,56 +554,58 @@ export default function UserLogging() {
                   </div>
                 ))}
               </div>
-              {jobList.map((job) => (
+              {jobList.map((job, jobIndex) => (
                 <div key={job.id} className="grid-row">
                   <div className="grid-cell job-name">{job.name}</div>
-                  {DAY_LABELS.map((_, dayIndex) => {
-                    const key = selectionKey(dayIndex, job.id);
-                    const rows = statusMap.get(key) ?? [];
-                    const isOn = rows.length > 0;
-                    const submissions = rows.flatMap(
-                      (row) => row.job_submissions ?? []
-                    );
-                    const latestSubmission = submissions
-                      .slice()
+                {DAY_LABELS.map((_, dayIndex) => {
+                  const key = selectionKey(dayIndex, job.id);
+                  const rows = statusMap.get(key) ?? [];
+                  const sheetStatus =
+                    sheetStatuses[jobIndex]?.[dayIndex]?.toUpperCase() ?? "";
+                  const effectiveStatus =
+                    sheetStatus || (rows.length > 0 ? "O" : "N");
+                  const isOn = effectiveStatus !== "N" && effectiveStatus !== "";
+                  const submissions = rows.flatMap(
+                    (row) => row.job_submissions ?? []
+                  );
+                  const latestSubmission = submissions
+                    .slice()
                       .sort(
                         (a, b) =>
                           new Date(b.submitted_at).getTime() -
                           new Date(a.submitted_at).getTime()
                       )[0];
                     const isComplete = Boolean(latestSubmission);
-                    const adminEntry = latestSubmission?.review_status === "admin";
-                    const late =
-                      isComplete &&
-                      selectedWeek &&
-                      latestSubmission &&
-                      !adminEntry
-                        ? isLateSubmission(
-                            latestSubmission.submitted_at,
-                            selectedWeek.start_date,
-                            dayIndex
-                          )
-                        : false;
-                    const label = isComplete
-                      ? latestSubmission?.users?.username ?? ""
-                      : "";
-                    const statusClass = isComplete
-                      ? late
-                        ? "late"
-                        : adminEntry
-                          ? "complete-admin"
-                          : "complete"
-                      : isOn
-                        ? "scheduled"
-                        : "not-scheduled";
-                    const text = isComplete ? label : isOn ? "--" : "";
-                    const actionable = isOn && !isComplete;
-                    const isSelected =
-                      actionable &&
-                      selectedJobId === rows[0]?.id &&
-                      selectedDay === dayIndex;
-                    return (
-                      <div key={key} className="grid-cell no-pad">
+                  const verified = Boolean(latestSubmission?.verified_by_admin);
+                  const statusClass = !isOn
+                    ? "not-scheduled"
+                    : isComplete
+                      ? verified
+                        ? "complete"
+                        : effectiveStatus === "RNG"
+                          ? "needs-verify"
+                          : "pending"
+                      : effectiveStatus === "RNG"
+                        ? "needs-verify"
+                        : "scheduled";
+                  const completedName = isComplete
+                    ? toFirstLower(latestSubmission?.users?.username)
+                    : "";
+                  const signupName = toFirstLower(
+                    sheetSignups[jobIndex]?.[dayIndex] ?? ""
+                  );
+                  const puntName = toFirstLower(
+                    rows.flatMap((row) => row.job_punts ?? [])
+                      .map((punt) => punt.users?.username)
+                      .find(Boolean)
+                  );
+                  const actionable = isOn && !isComplete;
+                  const isSelected =
+                    actionable &&
+                    selectedJobId === rows[0]?.id &&
+                    selectedDay === dayIndex;
+                  return (
+                    <div key={key} className="grid-cell no-pad">
                         <button
                           type="button"
                           className={`status-box ${statusClass} ${
@@ -611,13 +619,35 @@ export default function UserLogging() {
                             setSelectedDay(dayIndex);
                             setSelectedJobId(scheduled.id);
                           }}
-                          disabled={!actionable}
-                        >
-                          {text}
-                        </button>
-                      </div>
-                    );
-                  })}
+                        disabled={!actionable}
+                      >
+                        <div className="stack">
+                          {isOn && !isComplete && signupName && (
+                            <div className="muted">
+                              signup: {signupName}
+                              {effectiveStatus === "RNG" ? " (RNG)" : ""}
+                            </div>
+                          )}
+                          {isOn &&
+                            isComplete &&
+                            signupName &&
+                            signupName !== completedName && (
+                              <div className="muted">
+                                signup: {signupName}
+                                {effectiveStatus === "RNG" ? " (RNG)" : ""}
+                              </div>
+                            )}
+                          {isOn && isComplete && completedName && (
+                            <div>completed: {completedName}</div>
+                          )}
+                          {isOn && puntName && (
+                            <div className="text-danger">punt: {puntName}</div>
+                          )}
+                        </div>
+                      </button>
+                    </div>
+                  );
+                })}
                 </div>
               ))}
             </div>

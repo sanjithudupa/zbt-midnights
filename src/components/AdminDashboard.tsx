@@ -39,6 +39,7 @@ type WeekStatusRow = {
     user_id: string;
     review_status?: string | null;
     review_note?: string | null;
+    verified_by_admin?: boolean | null;
     users?: { id: string; username: string };
     submission_photos?: Array<{
       position: number;
@@ -62,7 +63,6 @@ type DetailModal = {
   dayLabel: string;
   submission: SubmissionItem | null;
   photos: Array<{ description: string; url: string | null }>;
-  late: boolean;
   adminEntry?: boolean;
 };
 
@@ -92,6 +92,13 @@ type CleanupSummaryRow = {
 };
 
 const selectionKey = (day: number, jobId: string) => `${day}:${jobId}`;
+
+const toFirstLower = (value?: string | null) => {
+  if (!value) return "";
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  return trimmed.split(/\s+/)[0].toLowerCase();
+};
 
 const IconEdit = () => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor">
@@ -154,18 +161,6 @@ function buildSelectionsFromTemplate(template?: WeekTemplateWithDays): Selection
     selections[selectionKey(day.day_of_week, day.job_definition_id)] = true;
   });
   return selections;
-}
-
-function isLateSubmission(
-  submittedAt: string,
-  weekStartDate: string,
-  dayIndex: number
-) {
-  const start = parseDateInput(weekStartDate);
-  const cutoff = new Date(start);
-  cutoff.setDate(start.getDate() + dayIndex + 1);
-  cutoff.setHours(3, 0, 0, 0);
-  return new Date(submittedAt) > cutoff;
 }
 
 function formatWeekRange(startDate: string) {
@@ -290,6 +285,7 @@ export default function AdminDashboard() {
   const [templateSelections, setTemplateSelections] = useState<SelectionMap>({});
 
   const [detailModal, setDetailModal] = useState<DetailModal | null>(null);
+  const [detailVerified, setDetailVerified] = useState(false);
   const [photoViewer, setPhotoViewer] = useState<PhotoViewerState | null>(null);
   const [adminEntryModal, setAdminEntryModal] = useState<AdminEntryModal | null>(
     null
@@ -315,6 +311,8 @@ export default function AdminDashboard() {
   const [settingsPromptOpen, setSettingsPromptOpen] = useState(false);
   const [settingsMasterPassword, setSettingsMasterPassword] = useState("");
   const [isStandalone, setIsStandalone] = useState(false);
+  const [sheetSignups, setSheetSignups] = useState<string[][]>([]);
+  const [sheetStatuses, setSheetStatuses] = useState<string[][]>([]);
 
   const changedSettingsCount = useMemo(() => {
     let count = 0;
@@ -347,26 +345,18 @@ export default function AdminDashboard() {
   const orderedJobDefinitions = activeJobDefinitions;
 
   const weekJobDefinitions = useMemo(() => {
-    const map = new Map<string, { name: string; sort_order?: number }>();
-    statusRows.forEach((row) => {
-      if (row.job_definitions?.name) {
-        map.set(row.job_definition_id, {
-          name: row.job_definitions.name,
-          sort_order: row.job_definitions.sort_order,
-        });
-      }
-    });
-    const list = Array.from(map.entries()).map(([id, meta]) => ({
-      id,
-      name: meta.name,
-      sort_order: meta.sort_order,
+    return activeJobDefinitions.map((job) => ({
+      id: job.id,
+      name: job.name,
+      sort_order: job.sort_order,
     }));
-    list.sort(
-      (a, b) =>
-        (a.sort_order ?? 0) - (b.sort_order ?? 0) || a.name.localeCompare(b.name)
-    );
-    return list;
-  }, [statusRows]);
+  }, [activeJobDefinitions]);
+
+  const weekJobIndexMap = useMemo(() => {
+    const map = new Map<string, number>();
+    weekJobDefinitions.forEach((job, index) => map.set(job.id, index));
+    return map;
+  }, [weekJobDefinitions]);
 
   const statusMap = useMemo(() => {
     const map = new Map<string, WeekStatusRow[]>();
@@ -409,11 +399,28 @@ export default function AdminDashboard() {
       loadWeekStatus(selectedWeekId);
       loadCleanupSummary();
       if (tab === "overview") {
-        fetch(`/api/sheets/week?weekId=${selectedWeekId}`).catch(() => null);
+        fetch(`/api/sheets/week?weekId=${selectedWeekId}&sync=1`)
+          .then((response) => (response.ok ? response.json() : null))
+          .then((data) => {
+            if (data?.signups) {
+              setSheetSignups(data.signups);
+            }
+            if (data?.statuses) {
+              setSheetStatuses(data.statuses);
+            }
+          })
+          .catch(() => null);
+      }
+      if (tab === "setup") {
+        fetch(`/api/sheets/week?weekId=${selectedWeekId}&sync=1`)
+          .then(() => loadWeekStatus(selectedWeekId))
+          .catch(() => null);
       }
     } else {
       setStatusRows([]);
       setWeekSelections({});
+      setSheetSignups([]);
+      setSheetStatuses([]);
     }
   }, [selectedWeekId, tab]);
 
@@ -575,6 +582,26 @@ export default function AdminDashboard() {
       if (selectedWeekId) {
         loadWeekStatus(selectedWeekId);
       }
+    }
+  };
+
+  const handleVerifySubmission = async () => {
+    if (!detailModal?.submission) return;
+    const response = await fetch(
+      `/api/admin/submissions/${detailModal.submission.id}`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ verified_by_admin: detailVerified }),
+      }
+    );
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      setError(data.error ?? "Failed to update verification.");
+      return;
+    }
+    if (selectedWeekId) {
+      loadWeekStatus(selectedWeekId);
     }
   };
 
@@ -1034,18 +1061,14 @@ export default function AdminDashboard() {
       }));
     }
 
-    const late =
-      submission.review_status !== "admin" &&
-      isLateSubmission(submission.submitted_at, selectedWeek.start_date, day);
-
     setDetailModal({
       jobName,
       dayLabel: FULL_DAY_LABELS[day] ?? "Day",
       submission,
       photos,
-      late,
       adminEntry,
     });
+    setDetailVerified(Boolean(submission.verified_by_admin));
   };
 
   const weekPreviewSelections = useMemo(() => {
@@ -1138,45 +1161,50 @@ export default function AdminDashboard() {
               jobList={weekJobDefinitions}
               statusMap={statusMap}
               renderCell={({ dayIndex, jobId, isOn, isComplete, label, latestSubmission }) => {
-                const late =
-                  isComplete &&
-                  selectedWeek &&
-                  latestSubmission &&
-                  latestSubmission.review_status !== "admin"
-                    ? isLateSubmission(
-                        latestSubmission.submitted_at,
-                        selectedWeek.start_date,
-                        dayIndex
-                      )
-                    : false;
-                const adminEntry = latestSubmission?.review_status === "admin";
-                const statusClass = late
-                  ? "late"
+                const jobIndex = weekJobIndexMap.get(jobId) ?? -1;
+                const sheetStatus =
+                  sheetStatuses[jobIndex]?.[dayIndex]?.toUpperCase() ?? "";
+                const effectiveStatus =
+                  sheetStatus || (isOn ? "O" : "N");
+                const statusOn = effectiveStatus !== "N" && effectiveStatus !== "";
+                const verified = Boolean(latestSubmission?.verified_by_admin);
+                const statusClass = !statusOn
+                  ? "not-scheduled"
                   : isComplete
-                    ? adminEntry
-                      ? "complete-admin"
-                      : "complete"
-                    : isOn
-                      ? "scheduled"
-                      : "not-scheduled";
-                const text = isComplete ? label : isOn ? "--" : "";
+                    ? verified
+                      ? "complete"
+                      : effectiveStatus === "RNG"
+                        ? "needs-verify"
+                        : "pending"
+                    : effectiveStatus === "RNG"
+                      ? "needs-verify"
+                      : "scheduled";
+                const completedName = isComplete
+                  ? toFirstLower(latestSubmission?.users?.username)
+                  : "";
+                const signupName = toFirstLower(
+                  sheetSignups[jobIndex]?.[dayIndex] ?? ""
+                );
                 const puntName = statusMap
                   .get(selectionKey(dayIndex, jobId))
                   ?.flatMap((row) => row.job_punts ?? [])
                   .map((punt) => punt.users?.username)
                   .find(Boolean);
-                const actionable = isOn && !isComplete;
+                const puntDisplay = toFirstLower(puntName);
+                const actionable = statusOn && !isComplete;
 
                 return (
                   <button
                     type="button"
                     className={`status-box ${statusClass}`}
+                    disabled={!statusOn}
                     onClick={() => {
+                      if (!statusOn) return;
                       if (isComplete && latestSubmission) {
                         handleOpenDetail(dayIndex, jobId, latestSubmission);
                         return;
                       }
-                      if (!isOn) return;
+                      if (!statusOn) return;
                       const rows = statusMap.get(selectionKey(dayIndex, jobId)) ?? [];
                       const requirements =
                         rows[0]?.job_definitions?.job_requirements
@@ -1198,15 +1226,35 @@ export default function AdminDashboard() {
                     }}
                   >
                     <div className="stack">
-                      <div>{text}</div>
-                      {puntName && (
-                        <div className="text-danger">{puntName} punt</div>
+                      {statusOn && !isComplete && signupName && (
+                        <div className="muted">
+                          signup: {signupName}
+                          {effectiveStatus === "RNG" ? " (RNG)" : ""}
+                        </div>
+                      )}
+                      {statusOn &&
+                        isComplete &&
+                        signupName &&
+                        signupName !== completedName && (
+                          <div className="muted">
+                            signup: {signupName}
+                            {effectiveStatus === "RNG" ? " (RNG)" : ""}
+                          </div>
+                        )}
+                      {statusOn && isComplete && completedName && (
+                        <div>completed: {completedName}</div>
+                      )}
+                      {statusOn && puntDisplay && (
+                        <div className="text-danger">punt: {puntDisplay}</div>
                       )}
                     </div>
                   </button>
                 );
               }}
             />
+          )}
+          {statusLoading && (
+            <div className="muted">Loading week overview...</div>
           )}
         </section>
       )}
@@ -1728,13 +1776,13 @@ export default function AdminDashboard() {
             {detailModal.submission ? (
               <div className="stack">
                 <div className="row">
-                  <span className={`badge ${detailModal.late ? "warning" : ""}`}>
+                  <span className="badge">
                     {detailModal.submission.users?.username ?? "Submitted"}
                   </span>
                   {detailModal.adminEntry && (
                     <span className="badge">Admin entry</span>
                   )}
-                  <span className={`muted ${detailModal.late ? "warning" : ""}`}>
+                  <span className="muted">
                     {new Date(detailModal.submission.submitted_at).toLocaleString(
                       undefined,
                       {
@@ -1770,6 +1818,17 @@ export default function AdminDashboard() {
                     </button>
                   ))}
                 </div>
+                <label className="inline">
+                  <input
+                    type="checkbox"
+                    checked={detailVerified}
+                    onChange={(event) => setDetailVerified(event.target.checked)}
+                  />
+                  Verified by admin
+                </label>
+                <button className="ghost" onClick={handleVerifySubmission}>
+                  Save verification
+                </button>
                 <button
                   className="danger"
                   onClick={() => handleDeleteSubmission(detailModal.submission!.id)}
