@@ -307,9 +307,14 @@ export default function AdminDashboard() {
   const [cleanupSummary, setCleanupSummary] = useState<CleanupSummaryRow[]>([]);
   const [cleanupStatus, setCleanupStatus] = useState<string | null>(null);
   const [settingsStatus, setSettingsStatus] = useState<string | null>(null);
+  const [settingsInitial, setSettingsInitial] = useState({
+    scheduleSource: "database",
+  });
   const [settingsDraft, setSettingsDraft] = useState({
     adminPassword: "",
     imgbbApiKey: "",
+    sheetsUrl: "",
+    scheduleSource: "database",
   });
   const [settingsPromptOpen, setSettingsPromptOpen] = useState(false);
   const [settingsMasterPassword, setSettingsMasterPassword] = useState("");
@@ -319,8 +324,10 @@ export default function AdminDashboard() {
     let count = 0;
     if (settingsDraft.adminPassword.trim()) count += 1;
     if (settingsDraft.imgbbApiKey.trim()) count += 1;
+    if (settingsDraft.sheetsUrl.trim()) count += 1;
+    if (settingsDraft.scheduleSource !== settingsInitial.scheduleSource) count += 1;
     return count;
-  }, [settingsDraft]);
+  }, [settingsDraft, settingsInitial]);
 
   const [jobEditorOpen, setJobEditorOpen] = useState(false);
   const [editingJobId, setEditingJobId] = useState<string | null>(null);
@@ -474,7 +481,13 @@ export default function AdminDashboard() {
   const loadSettingsFlags = async () => {
     const response = await fetch("/api/admin/settings");
     if (!response.ok) return;
-    await response.json();
+    const data = await response.json();
+    const source = data.settings?.scheduleSourceOfTruth ?? "database";
+    setSettingsInitial({ scheduleSource: source });
+    setSettingsDraft((prev) => ({
+      ...prev,
+      scheduleSource: source,
+    }));
   };
 
   const loadCleanupSummary = async () => {
@@ -964,6 +977,11 @@ export default function AdminDashboard() {
       body: JSON.stringify({
         adminPassword: settingsDraft.adminPassword.trim() || undefined,
         imgbbApiKey: settingsDraft.imgbbApiKey.trim() || undefined,
+        sheetsUrl: settingsDraft.sheetsUrl.trim() || undefined,
+        scheduleSourceOfTruth:
+          settingsDraft.scheduleSource !== settingsInitial.scheduleSource
+            ? settingsDraft.scheduleSource
+            : undefined,
         masterPassword: settingsMasterPassword,
       }),
     });
@@ -972,7 +990,13 @@ export default function AdminDashboard() {
       return;
     }
     setSettingsStatus("Settings updated.");
-    setSettingsDraft({ adminPassword: "", imgbbApiKey: "" });
+    setSettingsInitial({ scheduleSource: settingsDraft.scheduleSource });
+    setSettingsDraft((prev) => ({
+      adminPassword: "",
+      imgbbApiKey: "",
+      sheetsUrl: "",
+      scheduleSource: prev.scheduleSource,
+    }));
     setSettingsMasterPassword("");
     setSettingsPromptOpen(false);
     loadSettingsFlags();
@@ -1466,6 +1490,38 @@ export default function AdminDashboard() {
                   }))
                 }
               />
+            </label>
+            <label className="field">
+              <span>
+                Master Google Sheet URL{settingsDraft.sheetsUrl.trim() ? " *" : ""}
+              </span>
+              <input
+                type="url"
+                placeholder="Update SHEETS_URL"
+                value={settingsDraft.sheetsUrl}
+                onChange={(event) =>
+                  setSettingsDraft((prev) => ({
+                    ...prev,
+                    sheetsUrl: event.target.value,
+                  }))
+                }
+              />
+            </label>
+            <label className="field">
+              <span>Schedule source of truth</span>
+              <select
+                className="flat-select"
+                value={settingsDraft.scheduleSource}
+                onChange={(event) =>
+                  setSettingsDraft((prev) => ({
+                    ...prev,
+                    scheduleSource: event.target.value,
+                  }))
+                }
+              >
+                <option value="database">Database</option>
+                <option value="google sheet">Google Sheet</option>
+              </select>
             </label>
             <button
               className="primary"
