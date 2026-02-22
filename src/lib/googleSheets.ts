@@ -8,7 +8,7 @@ type ServiceAccountKey = {
   private_key: string;
 };
 
-const SHEETS_SCOPES = ["https://www.googleapis.com/auth/spreadsheets.readonly"];
+const SHEETS_SCOPES = ["https://www.googleapis.com/auth/spreadsheets"];
 
 export function getSpreadsheetId(input: string): string | null {
   if (!input) return null;
@@ -107,4 +107,47 @@ export async function listSheetNames(spreadsheetId: string): Promise<string[]> {
   return (
     response.data.sheets?.map((sheet) => sheet.properties?.title ?? "") ?? []
   ).filter(Boolean);
+}
+
+export async function getSheetValues(
+  spreadsheetId: string,
+  sheetName: string
+): Promise<string[][]> {
+  const sheets = getSheetsClient();
+  const response = await sheets.spreadsheets.values.get({
+    spreadsheetId,
+    range: sheetName,
+  });
+  return (response.data.values ?? []) as string[][];
+}
+
+export async function updateSheetCell(
+  spreadsheetId: string,
+  sheetName: string,
+  columnNumber: number,
+  rowNumber: number,
+  value: string
+) {
+  const sheets = getSheetsClient();
+  const columnLabel = columnNumberToName(columnNumber);
+  const range = `${sheetName}!${columnLabel}${rowNumber}`;
+  await sheets.spreadsheets.values.update({
+    spreadsheetId,
+    range,
+    valueInputOption: "RAW",
+    requestBody: {
+      values: [[value]],
+    },
+  });
+}
+
+function columnNumberToName(columnNumber: number) {
+  let num = columnNumber;
+  let label = "";
+  while (num > 0) {
+    const rem = (num - 1) % 26;
+    label = String.fromCharCode(65 + rem) + label;
+    num = Math.floor((num - 1) / 26);
+  }
+  return label;
 }

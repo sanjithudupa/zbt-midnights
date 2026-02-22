@@ -2,8 +2,21 @@ import { getAdminSetting } from "./adminSettings";
 import { getSpreadsheetId, listSheetNames } from "./googleSheets";
 
 const DEFAULT_SCHEDULE_SOURCE = "database";
+const POLL_TTL_MS = 60_000;
+
+let lastPollAt = 0;
+let inFlight: Promise<void> | null = null;
 
 export async function logSheetNamesIfEnabled() {
+  const now = Date.now();
+  if (inFlight) {
+    return inFlight;
+  }
+  if (now - lastPollAt < POLL_TTL_MS) {
+    return;
+  }
+
+  inFlight = (async () => {
   let scheduleSource = DEFAULT_SCHEDULE_SOURCE;
   try {
     const stored = await getAdminSetting("schedule_source_of_truth");
@@ -44,5 +57,14 @@ export async function logSheetNamesIfEnabled() {
     console.log(`[sheets] Available sheets: ${names.join(", ") || "(none)"}`);
   } catch (error) {
     console.error("Sheets polling failed.", error);
+  } finally {
+    lastPollAt = Date.now();
+  }
+  })();
+
+  try {
+    await inFlight;
+  } finally {
+    inFlight = null;
   }
 }

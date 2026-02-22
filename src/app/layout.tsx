@@ -1,7 +1,5 @@
 import type { Metadata } from "next";
 import "./globals.css";
-import { logSheetNamesIfEnabled } from "@/lib/sheetsPolling";
-
 export const runtime = "nodejs";
 
 export const metadata: Metadata = {
@@ -16,12 +14,11 @@ export const metadata: Metadata = {
   },
 };
 
-export default async function RootLayout({
+export default function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  await logSheetNamesIfEnabled();
   return (
     <html lang="en">
       <body>{children}</body>
