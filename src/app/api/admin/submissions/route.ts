@@ -1,14 +1,14 @@
 import { NextResponse } from "next/server";
 import { getServiceSupabase } from "@/lib/supabaseServer";
 import { requireAdmin } from "@/lib/auth";
-
-type AdminCheck = { position: number; checked: boolean };
+import { getAdminSetting } from "@/lib/adminSettings";
+import { updateWeekSheetVerification } from "@/lib/sheetsWeek";
 
 export async function POST(request: Request) {
   const unauthorized = await requireAdmin();
   if (unauthorized) return unauthorized;
 
-  const { scheduledJobId, userId, checks } = await request.json();
+  const { scheduledJobId, userId } = await request.json();
 
   if (typeof scheduledJobId !== "string" || !scheduledJobId) {
     return NextResponse.json(
@@ -19,15 +19,11 @@ export async function POST(request: Request) {
   if (typeof userId !== "string" || !userId) {
     return NextResponse.json({ error: "User required." }, { status: 400 });
   }
-  if (!Array.isArray(checks)) {
-    return NextResponse.json({ error: "Checks required." }, { status: 400 });
-  }
-
   const supabase = getServiceSupabase();
   const { data: scheduledJob, error: scheduledError } = await supabase
     .from("scheduled_jobs")
     .select(
-      "id, job_definition_id, job_definitions ( id, job_requirements ( position, description ) )"
+      "id, day_of_week, week_id, job_definition_id, job_definitions ( id, name, job_requirements ( position, description ) )"
     )
     .eq("id", scheduledJobId)
     .single();
@@ -46,24 +42,11 @@ export async function POST(request: Request) {
     jobDefinition?.job_requirements
       ?.slice()
       .sort((a, b) => a.position - b.position) ?? [];
-  const requirementPositions = new Set(
-    requirements.map((req) => req.position)
-  );
-
-  for (const check of checks as AdminCheck[]) {
-    if (!requirementPositions.has(check?.position)) {
-      return NextResponse.json(
-        { error: "Invalid requirement position." },
-        { status: 400 }
-      );
-    }
-  }
-
   const reviewNote = JSON.stringify({
     admin_entry: true,
-    checks: (checks as AdminCheck[]).map((check) => ({
-      position: check.position,
-      checked: Boolean(check.checked),
+    checks: requirements.map((req) => ({
+      position: req.position,
+      checked: true,
     })),
   });
 
@@ -71,6 +54,7 @@ export async function POST(request: Request) {
     scheduled_job_id: scheduledJobId,
     user_id: userId,
     review_status: "admin",
+    verified_by_admin: true,
     review_note: reviewNote,
   });
 
@@ -85,6 +69,32 @@ export async function POST(request: Request) {
       { error: "Failed to save admin submission." },
       { status: 500 }
     );
+  }
+
+  const scheduleSource = (await getAdminSetting("schedule_source_of_truth")) ?? "database";
+  if (scheduleSource === "google sheet" && jobDefinition?.name) {
+    const { data: week } = await supabase
+      .from("weeks")
+      .select("start_date")
+      .eq("id", scheduledJob.week_id)
+      .maybeSingle();
+    const { data: user } = await supabase
+      .from("users")
+      .select("username")
+      .eq("id", userId)
+      .maybeSingle();
+    if (week?.start_date) {
+      try {
+        await updateWeekSheetVerification({
+          startDate: week.start_date,
+          jobName: jobDefinition.name,
+          dayIndex: scheduledJob.day_of_week,
+          username: user?.username ?? "NONE",
+        });
+      } catch (error) {
+        console.error("Failed to update sheet for admin entry.", error);
+      }
+    }
   }
 
   return NextResponse.json({ ok: true });

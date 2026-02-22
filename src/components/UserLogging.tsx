@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { DAY_LABELS } from "@/lib/constants";
 import { formatDateInput, getDayIndex, getMonday, parseDateInput } from "@/lib/date";
@@ -25,6 +25,7 @@ type WeekStatusRow = {
     submitted_at: string;
     user_id: string;
     review_status?: string | null;
+    verified_by_admin?: boolean | null;
     users?: { id: string; username: string };
   }>;
 };
@@ -51,6 +52,13 @@ type PhotoSlot = {
 
 type SessionResponse = {
   session: { role: "admin" | "user"; userId?: string } | null;
+};
+
+type JobDefinition = {
+  id: string;
+  name: string;
+  sort_order?: number;
+  job_requirements?: Array<{ position: number; description: string }>;
 };
 
 const selectionKey = (day: number, jobId: string) => `${day}:${jobId}`;
@@ -95,6 +103,8 @@ export default function UserLogging() {
   const [selectedDay, setSelectedDay] = useState<number>(getDayIndex(new Date()));
   const [statusRows, setStatusRows] = useState<WeekStatusRow[]>([]);
   const [selectedJobId, setSelectedJobId] = useState<string>("");
+  const [selectedJobDefinitionId, setSelectedJobDefinitionId] = useState<string>("");
+  const [selectedCellKey, setSelectedCellKey] = useState<string>("");
   const [photoSlots, setPhotoSlots] = useState<PhotoSlot[]>([]);
   const [skipRemaining, setSkipRemaining] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -103,6 +113,10 @@ export default function UserLogging() {
     null
   );
   const [userName, setUserName] = useState<string>("");
+  const [scheduleSource, setScheduleSource] = useState<string>("database");
+  const [sheetWeekData, setSheetWeekData] = useState<string[][] | null>(null);
+  const [sheetWeekStatus, setSheetWeekStatus] = useState<string | null>(null);
+  const [jobDefinitions, setJobDefinitions] = useState<JobDefinition[]>([]);
 
   const [cameraOpen, setCameraOpen] = useState(false);
   const [cameraSlot, setCameraSlot] = useState<number | null>(null);
@@ -120,8 +134,24 @@ export default function UserLogging() {
   );
   const [torchSupported, setTorchSupported] = useState(false);
   const [isStandalone, setIsStandalone] = useState(false);
+  const [pendingRequests, setPendingRequests] = useState(0);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+
+  const isSheetMode = scheduleSource === "google sheet";
+  const isBusy = pendingRequests > 0;
+
+  const trackedFetch = useCallback(
+    async (...args: Parameters<typeof fetch>) => {
+      setPendingRequests((prev) => prev + 1);
+      try {
+        return await fetch(...args);
+      } finally {
+        setPendingRequests((prev) => Math.max(0, prev - 1));
+      }
+    },
+    []
+  );
 
   const CameraFlashIcon = () => (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor">
@@ -140,7 +170,7 @@ export default function UserLogging() {
 
   useEffect(() => {
     const loadWeeks = async () => {
-      const response = await fetch("/api/public/weeks");
+      const response = await trackedFetch("/api/public/weeks");
       if (!response.ok) return;
       const data = await response.json();
       const list: WeekSummary[] = data.weeks ?? [];
@@ -158,13 +188,38 @@ export default function UserLogging() {
   }, []);
 
   useEffect(() => {
+    const loadSettings = async () => {
+      const response = await trackedFetch("/api/public/settings");
+      if (!response.ok) return;
+      const data = await response.json();
+      setScheduleSource(data.settings?.scheduleSourceOfTruth ?? "database");
+    };
+    loadSettings();
+  }, []);
+
+  useEffect(() => {
+    if (scheduleSource !== "google sheet") {
+      setSheetWeekData(null);
+      setSheetWeekStatus(null);
+      return;
+    }
+    const loadJobDefinitions = async () => {
+      const response = await trackedFetch("/api/public/job-definitions");
+      if (!response.ok) return;
+      const data = await response.json();
+      setJobDefinitions(data.jobDefinitions ?? []);
+    };
+    loadJobDefinitions();
+  }, [scheduleSource]);
+
+  useEffect(() => {
     const loadUser = async () => {
-      const sessionRes = await fetch("/api/session");
+      const sessionRes = await trackedFetch("/api/session");
       if (!sessionRes.ok) return;
       const sessionData = (await sessionRes.json()) as SessionResponse;
       const userId = sessionData.session?.userId;
       if (!userId) return;
-      const usersRes = await fetch("/api/public/users");
+      const usersRes = await trackedFetch("/api/public/users");
       if (!usersRes.ok) return;
       const usersData = await usersRes.json();
       const match = (usersData.users ?? []).find(
@@ -185,13 +240,15 @@ export default function UserLogging() {
   useEffect(() => {
     if (!selectedWeekId) return;
     const loadStatus = async () => {
-      const response = await fetch(
+      const response = await trackedFetch(
         `/api/public/week-status?weekId=${selectedWeekId}`
       );
       if (!response.ok) return;
       const data = await response.json();
       setStatusRows(data.scheduledJobs ?? []);
       setSelectedJobId("");
+      setSelectedJobDefinitionId("");
+      setSelectedCellKey("");
       setPhotoSlots([]);
       setExistingSubmission(null);
       setSuccessOpen(false);
@@ -201,12 +258,41 @@ export default function UserLogging() {
   }, [selectedWeekId]);
 
   useEffect(() => {
+    if (scheduleSource !== "google sheet") return;
+    const week = weeks.find((item) => item.id === selectedWeekId);
+    if (!week?.start_date) return;
+    let cancelled = false;
+    setSheetWeekStatus("Loading sheet...");
+    trackedFetch(`/api/public/sheets/week?start_date=${week.start_date}`)
+      .then(async (response) => {
+        const data = await response.json();
+        if (!response.ok) {
+          throw new Error(data.error ?? "Failed to load sheet.");
+        }
+        if (!cancelled) {
+          setSheetWeekData(data.data ?? null);
+          setSheetWeekStatus(null);
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setSheetWeekData(null);
+          setSheetWeekStatus("Failed to load sheet.");
+        }
+        console.warn("[sheets] Failed to load sheet.", error);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [scheduleSource, selectedWeekId, weeks]);
+
+  useEffect(() => {
     const loadSubmission = async () => {
       if (!selectedJobId) {
         setExistingSubmission(null);
         return;
       }
-      const response = await fetch(
+      const response = await trackedFetch(
         `/api/user/submissions?scheduledJobId=${selectedJobId}`
       );
       if (!response.ok) return;
@@ -217,6 +303,25 @@ export default function UserLogging() {
   }, [selectedJobId]);
 
   useEffect(() => {
+    if (!selectedJobId) {
+      setPhotoSlots([]);
+      return;
+    }
+    if (scheduleSource === "google sheet" && selectedJobDefinitionId) {
+      const definition = jobDefinitions.find(
+        (item) => item.id === selectedJobDefinitionId
+      );
+      const requirements = (definition?.job_requirements ?? []).sort(
+        (a, b) => a.position - b.position
+      );
+      setPhotoSlots(
+        requirements.map((requirement) => ({
+          position: requirement.position,
+          description: requirement.description,
+        }))
+      );
+      return;
+    }
     const job = statusRows.find((item) => item.id === selectedJobId);
     if (!job) {
       setPhotoSlots([]);
@@ -231,16 +336,32 @@ export default function UserLogging() {
         description: requirement.description,
       }))
     );
-  }, [selectedJobId, statusRows]);
+  }, [selectedJobId, selectedJobDefinitionId, statusRows, scheduleSource, jobDefinitions]);
 
-  const selectedJob = useMemo(
-    () => statusRows.find((job) => job.id === selectedJobId),
-    [statusRows, selectedJobId]
-  );
+  const selectedJob = useMemo(() => {
+    if (scheduleSource === "google sheet") {
+      return selectedJobId ? { id: selectedJobId } : null;
+    }
+    return statusRows.find((job) => job.id === selectedJobId) ?? null;
+  }, [statusRows, selectedJobId, scheduleSource]);
 
 
 
-  const jobList = useMemo(() => {
+  const jobList = useMemo<Array<{ id: string; name: string; missing?: boolean }>>(() => {
+    if (scheduleSource === "google sheet" && sheetWeekData) {
+      const nameToDefinition = new Map(
+        jobDefinitions.map((definition) => [definition.name, definition])
+      );
+      const jobNames = sheetWeekData[0] ?? [];
+      return jobNames.map((name, index) => {
+        const definition = nameToDefinition.get(name);
+        return {
+          id: definition?.id ?? `sheet:${index}`,
+          name,
+          missing: !definition,
+        };
+      });
+    }
     const map = new Map<string, { id: string; name: string }>();
     statusRows.forEach((row) => {
       if (row.job_definitions?.id && !map.has(row.job_definitions.id)) {
@@ -259,7 +380,7 @@ export default function UserLogging() {
           ?.job_definitions?.sort_order ?? 0;
       return aOrder - bOrder || a.name.localeCompare(b.name);
     });
-  }, [statusRows]);
+  }, [statusRows, scheduleSource, sheetWeekData, jobDefinitions]);
 
   const selectedWeek = useMemo(
     () => weeks.find((week) => week.id === selectedWeekId),
@@ -277,6 +398,36 @@ export default function UserLogging() {
     });
     return map;
   }, [statusRows]);
+
+  const sheetSelections = useMemo(() => {
+    if (scheduleSource !== "google sheet" || !sheetWeekData) {
+      return {
+        selections: new Map<string, boolean>(),
+        assignments: new Map<string, string>(),
+        states: new Map<string, string>(),
+      };
+    }
+    const selections = new Map<string, boolean>();
+    const assignments = new Map<string, string>();
+    const states = new Map<string, string>();
+    jobList.forEach((job, jobIndex) => {
+      for (let dayIndex = 0; dayIndex < 7; dayIndex += 1) {
+        const nameIndex = 1 + dayIndex * 2;
+        const stateIndex = 2 + dayIndex * 2;
+        const state = sheetWeekData[stateIndex]?.[jobIndex] ?? "";
+        const normalized = state.trim().toUpperCase();
+        const isOn = ["O", "R", "P", "V", "RNG"].includes(normalized);
+        if (!isOn) continue;
+        selections.set(selectionKey(dayIndex, job.id), true);
+        states.set(selectionKey(dayIndex, job.id), normalized);
+        const assigned = sheetWeekData[nameIndex]?.[jobIndex]?.trim();
+        if (assigned) {
+          assignments.set(selectionKey(dayIndex, job.id), assigned);
+        }
+      }
+    });
+    return { selections, assignments, states };
+  }, [scheduleSource, sheetWeekData, jobList]);
 
 
   const allUploaded =
@@ -455,7 +606,7 @@ export default function UserLogging() {
     setError(null);
     setSuccessOpen(false);
 
-    const response = await fetch("/api/user/submissions", {
+    const response = await trackedFetch("/api/user/submissions", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -487,7 +638,7 @@ export default function UserLogging() {
   };
 
   const handleLogout = async () => {
-    await fetch("/api/logout", { method: "POST" });
+    await trackedFetch("/api/logout", { method: "POST" });
     router.push("/");
   };
 
@@ -509,9 +660,17 @@ export default function UserLogging() {
             )}
           </p>
         </div>
-        <button className="ghost" onClick={handleLogout}>
-          Log out
-        </button>
+        <div className="row">
+          {isBusy && (
+            <div className="loading-chip">
+              <span className="spinner" />
+              <span>Loading...</span>
+            </div>
+          )}
+          <button className="ghost" onClick={handleLogout} disabled={isBusy}>
+            {isBusy ? "Working..." : "Log out"}
+          </button>
+        </div>
       </header>
 
       {error && <div className="error-banner">{error}</div>}
@@ -537,6 +696,11 @@ export default function UserLogging() {
           <div className="muted" style={{ marginTop: "8px" }}>
             Tap a white box to log that job.
           </div>
+          {isSheetMode && sheetWeekStatus && (
+            <div className="muted" style={{ marginTop: "8px" }}>
+              {sheetWeekStatus}
+            </div>
+          )}
           <div className="grid-scroll">
             <div className="grid-table">
               <div className="grid-row">
@@ -549,11 +713,17 @@ export default function UserLogging() {
               </div>
               {jobList.map((job) => (
                 <div key={job.id} className="grid-row">
-                  <div className="grid-cell job-name">{job.name}</div>
+                  <div
+                    className={`grid-cell job-name${job.missing ? " text-danger" : ""}`}
+                  >
+                    {job.name}
+                  </div>
                   {DAY_LABELS.map((_, dayIndex) => {
                     const key = selectionKey(dayIndex, job.id);
                     const rows = statusMap.get(key) ?? [];
-                    const isOn = rows.length > 0;
+                    const isOn = isSheetMode
+                      ? Boolean(sheetSelections?.selections?.get(key))
+                      : rows.length > 0;
                     const submissions = rows.flatMap(
                       (row) => row.job_submissions ?? []
                     );
@@ -565,36 +735,44 @@ export default function UserLogging() {
                           new Date(a.submitted_at).getTime()
                       )[0];
                     const isComplete = Boolean(latestSubmission);
-                    const adminEntry = latestSubmission?.review_status === "admin";
-                    const late =
-                      isComplete &&
-                      selectedWeek &&
-                      latestSubmission &&
-                      !adminEntry
-                        ? isLateSubmission(
-                            latestSubmission.submitted_at,
-                            selectedWeek.start_date,
-                            dayIndex
-                          )
-                        : false;
-                    const label = isComplete
+                    const effectiveComplete = isOn ? isComplete : false;
+                    const sheetState = isSheetMode
+                      ? sheetSelections?.states?.get(key) ?? ""
+                      : "";
+                    const normalizedState = sheetState.trim().toUpperCase();
+                    const assignedName = isSheetMode
+                      ? sheetSelections?.assignments?.get(key) ?? ""
+                      : "";
+                    const isRng =
+                      normalizedState === "RNG" ||
+                      assignedName.trim().toUpperCase() === "RNG";
+                    const isVerified = normalizedState === "V";
+                    const label = effectiveComplete
                       ? latestSubmission?.users?.username ?? ""
                       : "";
-                    const statusClass = isComplete
-                      ? late
-                        ? "late"
-                        : adminEntry
-                          ? "complete-admin"
-                          : "complete"
-                      : isOn
-                        ? "scheduled"
-                        : "not-scheduled";
-                    const text = isComplete ? label : isOn ? "--" : "";
-                    const actionable = isOn && !isComplete;
-                    const isSelected =
-                      actionable &&
-                      selectedJobId === rows[0]?.id &&
-                      selectedDay === dayIndex;
+                    const assignedLabel = isOn && !effectiveComplete
+                      ? isRng
+                        ? assignedName && assignedName.trim().toUpperCase() !== "RNG"
+                          ? `rng: ${assignedName}`
+                          : "rng"
+                        : assignedName
+                          ? `assigned: ${assignedName}`
+                          : ""
+                      : "";
+                    const statusClass = isVerified
+                      ? "complete"
+                      : effectiveComplete
+                        ? "complete-admin"
+                        : isOn
+                          ? "scheduled"
+                          : "not-scheduled";
+                    const text = effectiveComplete ? label : assignedLabel;
+                    const actionable = isOn && !effectiveComplete && !job.missing;
+                    const isSelected = actionable
+                      ? isSheetMode
+                        ? selectedCellKey === key
+                        : selectedJobId === rows[0]?.id && selectedDay === dayIndex
+                      : false;
                     return (
                       <div key={key} className="grid-cell no-pad">
                         <button
@@ -605,14 +783,52 @@ export default function UserLogging() {
                           style={isSelected ? { background: "#dbeafe" } : undefined}
                           onClick={() => {
                             if (!actionable) return;
-                            const scheduled = rows[0];
-                            if (!scheduled) return;
                             setSelectedDay(dayIndex);
-                            setSelectedJobId(scheduled.id);
+                            setSelectedJobDefinitionId(
+                              job.id.startsWith("sheet:") ? "" : job.id
+                            );
+                            if (isSheetMode) {
+                              setSelectedCellKey(key);
+                            }
+                            if (!isSheetMode) {
+                              const scheduled = rows[0];
+                              if (!scheduled) return;
+                              setSelectedJobId(scheduled.id);
+                              return;
+                            }
+                            if (rows[0]?.id) {
+                              setSelectedJobId(rows[0].id);
+                              return;
+                            }
+                            if (!selectedWeekId || job.id.startsWith("sheet:")) {
+                              return;
+                            }
+                            trackedFetch("/api/public/sheets/scheduled-job", {
+                              method: "POST",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({
+                                weekId: selectedWeekId,
+                                dayOfWeek: dayIndex,
+                                jobDefinitionId: job.id,
+                              }),
+                            })
+                              .then(async (response) => {
+                                const data = await response.json();
+                                if (!response.ok) {
+                                  throw new Error(data.error ?? "Failed to prepare job.");
+                                }
+                                setSelectedJobId(data.scheduledJobId);
+                              })
+                              .catch((err) => {
+                                console.warn("[sheets] Failed to prepare job.", err);
+                                setError("Failed to prepare job.");
+                              });
                           }}
                           disabled={!actionable}
                         >
-                          {text}
+                          <div className="stack">
+                            {text && <div>{text}</div>}
+                          </div>
                         </button>
                       </div>
                     );
@@ -670,10 +886,14 @@ export default function UserLogging() {
 
           <button
             className="primary"
-            disabled={!canSubmit}
+            disabled={!canSubmit || isBusy}
             onClick={handleSubmit}
           >
-            {existingSubmission ? "Already submitted" : "Submit job"}
+            {isBusy
+              ? "Submitting..."
+              : existingSubmission
+                ? "Already submitted"
+                : "Submit job"}
           </button>
 
           {anyUploaded && !allUploaded && (

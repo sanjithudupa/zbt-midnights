@@ -25,7 +25,7 @@ export async function GET(
   const { data, error } = await supabase
     .from("scheduled_jobs")
     .select(
-      "id, day_of_week, sort_order, job_definition_id, job_definitions ( id, name, sort_order, job_requirements ( position, description ) ), job_punts ( scheduled_job_id, user_id, users!job_punts_user_id_fkey ( id, username ) ), job_submissions ( id, submitted_at, user_id, review_status, review_note, users!job_submissions_user_id_fkey ( id, username ), submission_photos ( position, imgbb_url, requirement_description_snapshot ) )"
+      "id, day_of_week, sort_order, job_definition_id, job_definitions ( id, name, sort_order, job_requirements ( position, description ) ), job_punts ( scheduled_job_id, user_id, users!job_punts_user_id_fkey ( id, username ) ), job_submissions ( id, scheduled_job_id, submitted_at, user_id, review_status, review_note, verified_by_admin, users!job_submissions_user_id_fkey ( id, username ), submission_photos ( position, imgbb_url, requirement_description_snapshot ) )"
     )
     .eq("week_id", id)
     .order("day_of_week", { ascending: true })

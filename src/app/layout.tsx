@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+export const runtime = "nodejs";
 
 export const metadata: Metadata = {
   title: "ZBT Midnights Tracker",
