@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { getServiceSupabase } from "@/lib/supabaseServer";
 import { requireAdmin } from "@/lib/auth";
-import { getAdminSetting } from "@/lib/adminSettings";
 import { updateWeekSheetVerification } from "@/lib/sheetsWeek";
 
 export async function POST(request: Request) {
@@ -20,12 +19,23 @@ export async function POST(request: Request) {
   const { data: submission, error } = await supabase
     .from("job_submissions")
     .select(
-      "id, scheduled_job_id, verified_by_admin, user_id, users ( username ), scheduled_jobs ( id, day_of_week, week_id, job_definitions ( name ) )"
+      "id, scheduled_job_id, verified_by_admin, user_id, users!job_submissions_user_id_fkey ( username ), scheduled_jobs ( id, day_of_week, week_id, job_definitions ( name ) )"
     )
     .eq("id", submissionId)
-    .single();
+    .maybeSingle();
 
-  if (error || !submission) {
+  if (error) {
+    console.error("Failed to load submission for approval.", {
+      submissionId,
+      error,
+    });
+    return NextResponse.json(
+      { error: "Failed to load submission." },
+      { status: 500 }
+    );
+  }
+
+  if (!submission) {
     return NextResponse.json(
       { error: "Submission not found." },
       { status: 404 }
@@ -49,7 +59,6 @@ export async function POST(request: Request) {
     }
   }
 
-  const scheduleSource = (await getAdminSetting("schedule_source_of_truth")) ?? "database";
   const scheduledJobRaw = submission.scheduled_jobs as
     | {
         id: string;
@@ -71,12 +80,7 @@ export async function POST(request: Request) {
     Array.isArray(scheduledJob?.job_definitions)
       ? scheduledJob?.job_definitions?.[0]?.name
       : scheduledJob?.job_definitions?.name;
-  if (
-    scheduleSource === "google sheet" &&
-    jobName &&
-    scheduledJob?.week_id &&
-    typeof scheduledJob.day_of_week === "number"
-  ) {
+  if (jobName && scheduledJob?.week_id && typeof scheduledJob.day_of_week === "number") {
     const submissionUserRaw = submission.users as
       | { username?: string }
       | Array<{ username?: string }>

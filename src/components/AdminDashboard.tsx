@@ -320,14 +320,16 @@ export default function AdminDashboard() {
   const [cleanupSummary, setCleanupSummary] = useState<CleanupSummaryRow[]>([]);
   const [cleanupStatus, setCleanupStatus] = useState<string | null>(null);
   const [settingsStatus, setSettingsStatus] = useState<string | null>(null);
-  const [settingsInitial, setSettingsInitial] = useState({
-    scheduleSource: "database",
+  const [settingsInitial, setSettingsInitial] = useState<{
+    scheduleSource: "database" | "google sheet";
+  }>({
+    scheduleSource: "google sheet",
   });
   const [settingsDraft, setSettingsDraft] = useState({
     adminPassword: "",
     imgbbApiKey: "",
     sheetsUrl: "",
-    scheduleSource: "database",
+    scheduleSource: "google sheet" as "database" | "google sheet",
   });
   const [settingsPromptOpen, setSettingsPromptOpen] = useState(false);
   const [settingsMasterPassword, setSettingsMasterPassword] = useState("");
@@ -339,11 +341,13 @@ export default function AdminDashboard() {
     if (settingsDraft.adminPassword.trim()) count += 1;
     if (settingsDraft.imgbbApiKey.trim()) count += 1;
     if (settingsDraft.sheetsUrl.trim()) count += 1;
-    if (settingsDraft.scheduleSource !== settingsInitial.scheduleSource) count += 1;
+    if (settingsDraft.scheduleSource !== settingsInitial.scheduleSource) {
+      count += 1;
+    }
     return count;
   }, [settingsDraft, settingsInitial]);
 
-  const isSheetMode = settingsInitial.scheduleSource === "google sheet";
+  const isSheetMode = true;
   const isBusy = pendingRequests > 0;
 
   const trackedFetch = useCallback(
@@ -579,14 +583,10 @@ export default function AdminDashboard() {
   };
 
   const loadSettingsFlags = async () => {
-    const response = await trackedFetch("/api/admin/settings");
-    if (!response.ok) return;
-    const data = await response.json();
-    const source = data.settings?.scheduleSourceOfTruth ?? "database";
-    setSettingsInitial({ scheduleSource: source });
+    setSettingsInitial({ scheduleSource: "google sheet" });
     setSettingsDraft((prev) => ({
       ...prev,
-      scheduleSource: source,
+      scheduleSource: "google sheet",
     }));
   };
 
@@ -1322,9 +1322,7 @@ export default function AdminDashboard() {
           {selectedWeek && !isSheetMode && weekJobDefinitions.length === 0 && (
             <div className="muted">No scheduled jobs for this week yet.</div>
           )}
-          {selectedWeek &&
-            !isSheetMode &&
-            weekJobDefinitions.length > 0 && (
+          {selectedWeek && !isSheetMode && weekJobDefinitions.length > 0 && (
             <JobDayGrid
               jobList={weekJobDefinitions}
               statusMap={statusMap}
@@ -1761,11 +1759,10 @@ export default function AdminDashboard() {
                 onChange={(event) =>
                   setSettingsDraft((prev) => ({
                     ...prev,
-                    scheduleSource: event.target.value,
+                    scheduleSource: "google sheet",
                   }))
                 }
               >
-                <option value="database">Database</option>
                 <option value="google sheet">Google Sheet</option>
               </select>
             </label>

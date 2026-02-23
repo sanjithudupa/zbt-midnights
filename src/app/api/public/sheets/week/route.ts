@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/auth";
-import { getAdminSetting } from "@/lib/adminSettings";
 import { getWeekSheetData } from "@/lib/sheetsWeek";
 
 export const runtime = "nodejs";
@@ -13,11 +12,6 @@ export async function GET(request: Request) {
   const startDate = searchParams.get("start_date");
   if (!startDate) {
     return NextResponse.json({ error: "Missing start_date." }, { status: 400 });
-  }
-
-  const scheduleSource = (await getAdminSetting("schedule_source_of_truth")) ?? "database";
-  if (scheduleSource !== "google sheet") {
-    return NextResponse.json({ ok: true, skipped: true });
   }
 
   try {
