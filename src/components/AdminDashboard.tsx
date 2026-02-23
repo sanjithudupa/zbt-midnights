@@ -11,7 +11,7 @@ import type {
   Week,
   WeekTemplate,
 } from "@/lib/types";
-import { formatDateInput, parseDateInput, isMonday } from "@/lib/date";
+import { formatDateInput, parseDateInput, isMonday, getMonday } from "@/lib/date";
 
 type WeekTemplateWithDays = WeekTemplate & {
   week_template_days?: Array<{
@@ -85,6 +85,7 @@ type AdminEntryModal = {
   dayLabel: string;
   requirements: Array<{ position: number; description: string }>;
   puntUserId?: string | null;
+  defaultUserId?: string | null;
 };
 
 type CleanupSummaryRow = {
@@ -552,9 +553,19 @@ export default function AdminDashboard() {
     const response = await trackedFetch("/api/admin/weeks");
     if (response.ok) {
       const data = await response.json();
-      setWeeks(data.weeks ?? []);
-      if (!selectedWeekId && data.weeks?.length) {
-        setSelectedWeekId(data.weeks[0].id);
+      const weekList = data.weeks ?? [];
+      setWeeks(weekList);
+      if (weekList.length) {
+        const monday = getMonday(new Date());
+        const mondayString = formatDateInput(monday);
+        const currentWeek = weekList.find(
+          (week: { start_date: string }) => week.start_date === mondayString
+        );
+        if (currentWeek) {
+          setSelectedWeekId(currentWeek.id);
+        } else if (!selectedWeekId) {
+          setSelectedWeekId(weekList[0].id);
+        }
       }
     }
   };
@@ -706,7 +717,7 @@ export default function AdminDashboard() {
 
   const handleOpenAdminEntry = (payload: AdminEntryModal) => {
     setAdminEntryModal(payload);
-    setAdminEntryUserId(users[0]?.id ?? "");
+    setAdminEntryUserId(payload.defaultUserId ?? users[0]?.id ?? "");
     setPuntUserId(payload.puntUserId ?? users[0]?.id ?? "");
     setAdminEntryMode("log");
   };
@@ -716,6 +727,7 @@ export default function AdminDashboard() {
     dayIndex: number;
     jobId: string;
     jobName: string;
+    assignedName?: string;
     existingScheduledJobId?: string;
     puntUserId?: string | null;
   }) => {
@@ -749,12 +761,21 @@ export default function AdminDashboard() {
       return;
     }
 
+    const assignedName = args.assignedName?.trim() ?? "";
+    const matchedAssignedUser =
+      assignedName && assignedName.toUpperCase() !== "RNG"
+        ? users.find(
+            (user) => user.username.trim().toLowerCase() === assignedName.toLowerCase()
+          )
+        : undefined;
+
     handleOpenAdminEntry({
       scheduledJobId,
       jobName: args.jobName,
       dayLabel: FULL_DAY_LABELS[args.dayIndex],
       requirements,
       puntUserId: args.puntUserId,
+      defaultUserId: matchedAssignedUser?.id ?? null,
     });
   };
 
@@ -1454,6 +1475,7 @@ export default function AdminDashboard() {
                         jobName:
                           sheetDerived.jobList.find((job) => job.id === jobId)?.name ??
                           "Job",
+                        assignedName,
                         existingScheduledJobId: rows[0]?.id,
                         puntUserId,
                       });
