@@ -5,7 +5,7 @@ export async function GET() {
   const supabase = getServiceSupabase();
   const { data, error } = await supabase
     .from("weeks")
-    .select("id, start_date, template_id")
+    .select("id, start_date")
     .order("start_date", { ascending: false });
 
   if (error) {

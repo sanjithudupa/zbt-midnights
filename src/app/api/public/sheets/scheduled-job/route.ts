@@ -1,16 +1,10 @@
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/auth";
-import { getAdminSetting } from "@/lib/adminSettings";
 import { getServiceSupabase } from "@/lib/supabaseServer";
 
 export async function POST(request: Request) {
   const unauthorized = await requireUser();
   if (unauthorized) return unauthorized;
-
-  const scheduleSource = (await getAdminSetting("schedule_source_of_truth")) ?? "database";
-  if (scheduleSource !== "google sheet") {
-    return NextResponse.json({ error: "Sheets mode not enabled." }, { status: 400 });
-  }
 
   const body = await request.json();
   const { weekId, dayOfWeek, jobDefinitionId } = body ?? {};

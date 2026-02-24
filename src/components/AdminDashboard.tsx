@@ -11,7 +11,7 @@ import type {
   Week,
   WeekTemplate,
 } from "@/lib/types";
-import { formatDateInput, parseDateInput, isMonday } from "@/lib/date";
+import { formatDateInput, parseDateInput, isMonday, getMonday } from "@/lib/date";
 
 type WeekTemplateWithDays = WeekTemplate & {
   week_template_days?: Array<{
@@ -85,6 +85,7 @@ type AdminEntryModal = {
   dayLabel: string;
   requirements: Array<{ position: number; description: string }>;
   puntUserId?: string | null;
+  defaultUserId?: string | null;
 };
 
 type CleanupSummaryRow = {
@@ -275,7 +276,7 @@ function JobDayGrid({
 
 export default function AdminDashboard() {
   const router = useRouter();
-  const [tab, setTab] = useState<"overview" | "setup" | "jobs" | "users" | "settings">(
+  const [tab, setTab] = useState<"overview" | "jobs" | "users" | "settings">(
     "overview"
   );
   const [users, setUsers] = useState<User[]>([]);
@@ -320,14 +321,16 @@ export default function AdminDashboard() {
   const [cleanupSummary, setCleanupSummary] = useState<CleanupSummaryRow[]>([]);
   const [cleanupStatus, setCleanupStatus] = useState<string | null>(null);
   const [settingsStatus, setSettingsStatus] = useState<string | null>(null);
-  const [settingsInitial, setSettingsInitial] = useState({
-    scheduleSource: "database",
+  const [settingsInitial, setSettingsInitial] = useState<{
+    scheduleSource: "database" | "google sheet";
+  }>({
+    scheduleSource: "google sheet",
   });
   const [settingsDraft, setSettingsDraft] = useState({
     adminPassword: "",
     imgbbApiKey: "",
     sheetsUrl: "",
-    scheduleSource: "database",
+    scheduleSource: "google sheet" as "database" | "google sheet",
   });
   const [settingsPromptOpen, setSettingsPromptOpen] = useState(false);
   const [settingsMasterPassword, setSettingsMasterPassword] = useState("");
@@ -339,11 +342,13 @@ export default function AdminDashboard() {
     if (settingsDraft.adminPassword.trim()) count += 1;
     if (settingsDraft.imgbbApiKey.trim()) count += 1;
     if (settingsDraft.sheetsUrl.trim()) count += 1;
-    if (settingsDraft.scheduleSource !== settingsInitial.scheduleSource) count += 1;
+    if (settingsDraft.scheduleSource !== settingsInitial.scheduleSource) {
+      count += 1;
+    }
     return count;
   }, [settingsDraft, settingsInitial]);
 
-  const isSheetMode = settingsInitial.scheduleSource === "google sheet";
+  const isSheetMode = true;
   const isBusy = pendingRequests > 0;
 
   const trackedFetch = useCallback(
@@ -548,9 +553,19 @@ export default function AdminDashboard() {
     const response = await trackedFetch("/api/admin/weeks");
     if (response.ok) {
       const data = await response.json();
-      setWeeks(data.weeks ?? []);
-      if (!selectedWeekId && data.weeks?.length) {
-        setSelectedWeekId(data.weeks[0].id);
+      const weekList = data.weeks ?? [];
+      setWeeks(weekList);
+      if (weekList.length) {
+        const monday = getMonday(new Date());
+        const mondayString = formatDateInput(monday);
+        const currentWeek = weekList.find(
+          (week: { start_date: string }) => week.start_date === mondayString
+        );
+        if (currentWeek) {
+          setSelectedWeekId(currentWeek.id);
+        } else if (!selectedWeekId) {
+          setSelectedWeekId(weekList[0].id);
+        }
       }
     }
   };
@@ -579,14 +594,10 @@ export default function AdminDashboard() {
   };
 
   const loadSettingsFlags = async () => {
-    const response = await trackedFetch("/api/admin/settings");
-    if (!response.ok) return;
-    const data = await response.json();
-    const source = data.settings?.scheduleSourceOfTruth ?? "database";
-    setSettingsInitial({ scheduleSource: source });
+    setSettingsInitial({ scheduleSource: "google sheet" });
     setSettingsDraft((prev) => ({
       ...prev,
-      scheduleSource: source,
+      scheduleSource: "google sheet",
     }));
   };
 
@@ -706,7 +717,7 @@ export default function AdminDashboard() {
 
   const handleOpenAdminEntry = (payload: AdminEntryModal) => {
     setAdminEntryModal(payload);
-    setAdminEntryUserId(users[0]?.id ?? "");
+    setAdminEntryUserId(payload.defaultUserId ?? users[0]?.id ?? "");
     setPuntUserId(payload.puntUserId ?? users[0]?.id ?? "");
     setAdminEntryMode("log");
   };
@@ -716,6 +727,7 @@ export default function AdminDashboard() {
     dayIndex: number;
     jobId: string;
     jobName: string;
+    assignedName?: string;
     existingScheduledJobId?: string;
     puntUserId?: string | null;
   }) => {
@@ -749,12 +761,21 @@ export default function AdminDashboard() {
       return;
     }
 
+    const assignedName = args.assignedName?.trim() ?? "";
+    const matchedAssignedUser =
+      assignedName && assignedName.toUpperCase() !== "RNG"
+        ? users.find(
+            (user) => user.username.trim().toLowerCase() === assignedName.toLowerCase()
+          )
+        : undefined;
+
     handleOpenAdminEntry({
       scheduledJobId,
       jobName: args.jobName,
       dayLabel: FULL_DAY_LABELS[args.dayIndex],
       requirements,
       puntUserId: args.puntUserId,
+      defaultUserId: matchedAssignedUser?.id ?? null,
     });
   };
 
@@ -1269,12 +1290,6 @@ export default function AdminDashboard() {
           Week Overview
         </button>
         <button
-          className={tab === "setup" ? "tab active" : "tab"}
-          onClick={() => setTab("setup")}
-        >
-          Week Setup
-        </button>
-        <button
           className={tab === "jobs" ? "tab active" : "tab"}
           onClick={() => setTab("jobs")}
         >
@@ -1322,9 +1337,7 @@ export default function AdminDashboard() {
           {selectedWeek && !isSheetMode && weekJobDefinitions.length === 0 && (
             <div className="muted">No scheduled jobs for this week yet.</div>
           )}
-          {selectedWeek &&
-            !isSheetMode &&
-            weekJobDefinitions.length > 0 && (
+          {selectedWeek && !isSheetMode && weekJobDefinitions.length > 0 && (
             <JobDayGrid
               jobList={weekJobDefinitions}
               statusMap={statusMap}
@@ -1456,6 +1469,7 @@ export default function AdminDashboard() {
                         jobName:
                           sheetDerived.jobList.find((job) => job.id === jobId)?.name ??
                           "Job",
+                        assignedName,
                         existingScheduledJobId: rows[0]?.id,
                         puntUserId,
                       });
@@ -1472,128 +1486,6 @@ export default function AdminDashboard() {
               }}
             />
           ) : null}
-        </section>
-      )}
-
-      {tab === "setup" && (
-        <section className="card">
-          <h2>Week Setup</h2>
-          <label className="field block-gap">
-            <span>Select week</span>
-            <select
-              className="flat-select"
-              value={selectedWeekId}
-              onChange={(event) => {
-                if (event.target.value === "__create__") {
-                  setCreateWeekOpen(true);
-                  return;
-                }
-                setSelectedWeekId(event.target.value);
-              }}
-            >
-              <option value="">Select week</option>
-              {weeks.map((week) => (
-                <option key={week.id} value={week.id}>
-                  {week.start_date}
-                </option>
-              ))}
-              <option value="__create__">Create week...</option>
-            </select>
-          </label>
-
-          {selectedWeek && (
-            <div className="stack">
-              <div className="row">
-                <span className="muted">
-                  {formatWeekRange(selectedWeek.start_date)}
-                </span>
-                <select
-                  className="flat-select"
-                  value={applyTemplateId}
-                  onChange={(event) => {
-                    if (event.target.value === "__create_template__") {
-                      setApplyTemplateId("");
-                      handleOpenCreateTemplate();
-                      return;
-                    }
-                    setApplyTemplateId(event.target.value);
-                  }}
-                >
-                  <option value="">Select template</option>
-                  {templates.map((template) => (
-                    <option key={template.id} value={template.id}>
-                      {template.name}
-                    </option>
-                  ))}
-                  <option value="__create_template__">Create template...</option>
-                </select>
-                <button
-                  className="primary"
-                  onClick={handleApplyTemplate}
-                  disabled={!applyTemplateId}
-                >
-                  Apply Template
-                </button>
-                <button
-                  className="ghost"
-                  onClick={() => {
-                    if (!applyTemplateId) return;
-                    setSelectedTemplateId(applyTemplateId);
-                    setTemplateEditorOpen(true);
-                  }}
-                  disabled={!applyTemplateId}
-                >
-                  <IconEdit />
-                </button>
-              </div>
-
-              <JobDayGrid
-                jobList={activeJobDefinitions}
-                selections={weekSelections}
-                renderCell={({ dayIndex, jobId, isOn }) => (
-                  <div className="checkbox-cell">
-                    <input
-                      type="checkbox"
-                      checked={isOn}
-                      onChange={() =>
-                        toggleSelection(setWeekSelections, dayIndex, jobId)
-                      }
-                    />
-                  </div>
-                )}
-              />
-
-              <button className="primary" onClick={handleSaveWeekSchedule}>
-                Save Week Setup
-              </button>
-
-              <div className="stack section-gap">
-                <strong>Cleanup</strong>
-                {cleanupStatus && <div className="muted">{cleanupStatus}</div>}
-                <div className="row">
-                  <span>
-                    {selectedCleanup
-                      ? `${selectedCleanup.deleted_photos}/${selectedCleanup.total_photos} deleted`
-                      : "0/0 deleted"}
-                  </span>
-                  <button
-                    className="ghost"
-                    onClick={() => handleCleanupWeek(selectedWeek.id)}
-                  >
-                    Delete ImgBB images
-                  </button>
-                </div>
-              </div>
-              <div className="row-end">
-                <button
-                  className="danger"
-                  onClick={() => handleDeleteWeek(selectedWeek.id)}
-                >
-                  Delete record of week
-                </button>
-              </div>
-            </div>
-          )}
         </section>
       )}
 
@@ -1761,11 +1653,10 @@ export default function AdminDashboard() {
                 onChange={(event) =>
                   setSettingsDraft((prev) => ({
                     ...prev,
-                    scheduleSource: event.target.value,
+                    scheduleSource: "google sheet",
                   }))
                 }
               >
-                <option value="database">Database</option>
                 <option value="google sheet">Google Sheet</option>
               </select>
             </label>

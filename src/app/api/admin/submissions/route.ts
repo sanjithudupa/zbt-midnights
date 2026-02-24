@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { getServiceSupabase } from "@/lib/supabaseServer";
 import { requireAdmin } from "@/lib/auth";
-import { getAdminSetting } from "@/lib/adminSettings";
 import { updateWeekSheetVerification } from "@/lib/sheetsWeek";
 
 export async function POST(request: Request) {
@@ -71,8 +70,7 @@ export async function POST(request: Request) {
     );
   }
 
-  const scheduleSource = (await getAdminSetting("schedule_source_of_truth")) ?? "database";
-  if (scheduleSource === "google sheet" && jobDefinition?.name) {
+  if (jobDefinition?.name) {
     const { data: week } = await supabase
       .from("weeks")
       .select("start_date")

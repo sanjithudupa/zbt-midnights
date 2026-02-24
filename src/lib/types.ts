@@ -35,7 +35,6 @@ export type WeekTemplateDay = {
 export type Week = {
   id: string;
   start_date: string;
-  template_id: string | null;
   created_at: string;
 };
 

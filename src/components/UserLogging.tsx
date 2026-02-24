@@ -113,7 +113,6 @@ export default function UserLogging() {
     null
   );
   const [userName, setUserName] = useState<string>("");
-  const [scheduleSource, setScheduleSource] = useState<string>("database");
   const [sheetWeekData, setSheetWeekData] = useState<string[][] | null>(null);
   const [sheetWeekStatus, setSheetWeekStatus] = useState<string | null>(null);
   const [jobDefinitions, setJobDefinitions] = useState<JobDefinition[]>([]);
@@ -138,7 +137,7 @@ export default function UserLogging() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
-  const isSheetMode = scheduleSource === "google sheet";
+  const isSheetMode = true;
   const isBusy = pendingRequests > 0;
 
   const trackedFetch = useCallback(
@@ -188,21 +187,6 @@ export default function UserLogging() {
   }, []);
 
   useEffect(() => {
-    const loadSettings = async () => {
-      const response = await trackedFetch("/api/public/settings");
-      if (!response.ok) return;
-      const data = await response.json();
-      setScheduleSource(data.settings?.scheduleSourceOfTruth ?? "database");
-    };
-    loadSettings();
-  }, []);
-
-  useEffect(() => {
-    if (scheduleSource !== "google sheet") {
-      setSheetWeekData(null);
-      setSheetWeekStatus(null);
-      return;
-    }
     const loadJobDefinitions = async () => {
       const response = await trackedFetch("/api/public/job-definitions");
       if (!response.ok) return;
@@ -210,7 +194,7 @@ export default function UserLogging() {
       setJobDefinitions(data.jobDefinitions ?? []);
     };
     loadJobDefinitions();
-  }, [scheduleSource]);
+  }, []);
 
   useEffect(() => {
     const loadUser = async () => {
@@ -258,7 +242,6 @@ export default function UserLogging() {
   }, [selectedWeekId]);
 
   useEffect(() => {
-    if (scheduleSource !== "google sheet") return;
     const week = weeks.find((item) => item.id === selectedWeekId);
     if (!week?.start_date) return;
     let cancelled = false;
@@ -284,7 +267,7 @@ export default function UserLogging() {
     return () => {
       cancelled = true;
     };
-  }, [scheduleSource, selectedWeekId, weeks]);
+  }, [selectedWeekId, weeks]);
 
   useEffect(() => {
     const loadSubmission = async () => {
@@ -307,7 +290,7 @@ export default function UserLogging() {
       setPhotoSlots([]);
       return;
     }
-    if (scheduleSource === "google sheet" && selectedJobDefinitionId) {
+    if (selectedJobDefinitionId) {
       const definition = jobDefinitions.find(
         (item) => item.id === selectedJobDefinitionId
       );
@@ -336,19 +319,16 @@ export default function UserLogging() {
         description: requirement.description,
       }))
     );
-  }, [selectedJobId, selectedJobDefinitionId, statusRows, scheduleSource, jobDefinitions]);
+  }, [selectedJobId, selectedJobDefinitionId, statusRows, jobDefinitions]);
 
   const selectedJob = useMemo(() => {
-    if (scheduleSource === "google sheet") {
-      return selectedJobId ? { id: selectedJobId } : null;
-    }
-    return statusRows.find((job) => job.id === selectedJobId) ?? null;
-  }, [statusRows, selectedJobId, scheduleSource]);
+    return selectedJobId ? { id: selectedJobId } : null;
+  }, [selectedJobId]);
 
 
 
   const jobList = useMemo<Array<{ id: string; name: string; missing?: boolean }>>(() => {
-    if (scheduleSource === "google sheet" && sheetWeekData) {
+    if (sheetWeekData) {
       const nameToDefinition = new Map(
         jobDefinitions.map((definition) => [definition.name, definition])
       );
@@ -380,7 +360,7 @@ export default function UserLogging() {
           ?.job_definitions?.sort_order ?? 0;
       return aOrder - bOrder || a.name.localeCompare(b.name);
     });
-  }, [statusRows, scheduleSource, sheetWeekData, jobDefinitions]);
+  }, [statusRows, sheetWeekData, jobDefinitions]);
 
   const selectedWeek = useMemo(
     () => weeks.find((week) => week.id === selectedWeekId),
@@ -400,7 +380,7 @@ export default function UserLogging() {
   }, [statusRows]);
 
   const sheetSelections = useMemo(() => {
-    if (scheduleSource !== "google sheet" || !sheetWeekData) {
+    if (!sheetWeekData) {
       return {
         selections: new Map<string, boolean>(),
         assignments: new Map<string, string>(),
@@ -427,7 +407,7 @@ export default function UserLogging() {
       }
     });
     return { selections, assignments, states };
-  }, [scheduleSource, sheetWeekData, jobList]);
+  }, [sheetWeekData, jobList]);
 
 
   const allUploaded =
