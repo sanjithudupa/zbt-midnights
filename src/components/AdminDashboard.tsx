@@ -276,7 +276,7 @@ function JobDayGrid({
 
 export default function AdminDashboard() {
   const router = useRouter();
-  const [tab, setTab] = useState<"overview" | "setup" | "jobs" | "users" | "settings">(
+  const [tab, setTab] = useState<"overview" | "jobs" | "users" | "settings">(
     "overview"
   );
   const [users, setUsers] = useState<User[]>([]);
@@ -1290,12 +1290,6 @@ export default function AdminDashboard() {
           Week Overview
         </button>
         <button
-          className={tab === "setup" ? "tab active" : "tab"}
-          onClick={() => setTab("setup")}
-        >
-          Week Setup
-        </button>
-        <button
           className={tab === "jobs" ? "tab active" : "tab"}
           onClick={() => setTab("jobs")}
         >
@@ -1492,128 +1486,6 @@ export default function AdminDashboard() {
               }}
             />
           ) : null}
-        </section>
-      )}
-
-      {tab === "setup" && (
-        <section className="card">
-          <h2>Week Setup</h2>
-          <label className="field block-gap">
-            <span>Select week</span>
-            <select
-              className="flat-select"
-              value={selectedWeekId}
-              onChange={(event) => {
-                if (event.target.value === "__create__") {
-                  setCreateWeekOpen(true);
-                  return;
-                }
-                setSelectedWeekId(event.target.value);
-              }}
-            >
-              <option value="">Select week</option>
-              {weeks.map((week) => (
-                <option key={week.id} value={week.id}>
-                  {week.start_date}
-                </option>
-              ))}
-              <option value="__create__">Create week...</option>
-            </select>
-          </label>
-
-          {selectedWeek && (
-            <div className="stack">
-              <div className="row">
-                <span className="muted">
-                  {formatWeekRange(selectedWeek.start_date)}
-                </span>
-                <select
-                  className="flat-select"
-                  value={applyTemplateId}
-                  onChange={(event) => {
-                    if (event.target.value === "__create_template__") {
-                      setApplyTemplateId("");
-                      handleOpenCreateTemplate();
-                      return;
-                    }
-                    setApplyTemplateId(event.target.value);
-                  }}
-                >
-                  <option value="">Select template</option>
-                  {templates.map((template) => (
-                    <option key={template.id} value={template.id}>
-                      {template.name}
-                    </option>
-                  ))}
-                  <option value="__create_template__">Create template...</option>
-                </select>
-                <button
-                  className="primary"
-                  onClick={handleApplyTemplate}
-                  disabled={!applyTemplateId}
-                >
-                  Apply Template
-                </button>
-                <button
-                  className="ghost"
-                  onClick={() => {
-                    if (!applyTemplateId) return;
-                    setSelectedTemplateId(applyTemplateId);
-                    setTemplateEditorOpen(true);
-                  }}
-                  disabled={!applyTemplateId}
-                >
-                  <IconEdit />
-                </button>
-              </div>
-
-              <JobDayGrid
-                jobList={activeJobDefinitions}
-                selections={weekSelections}
-                renderCell={({ dayIndex, jobId, isOn }) => (
-                  <div className="checkbox-cell">
-                    <input
-                      type="checkbox"
-                      checked={isOn}
-                      onChange={() =>
-                        toggleSelection(setWeekSelections, dayIndex, jobId)
-                      }
-                    />
-                  </div>
-                )}
-              />
-
-              <button className="primary" onClick={handleSaveWeekSchedule}>
-                Save Week Setup
-              </button>
-
-              <div className="stack section-gap">
-                <strong>Cleanup</strong>
-                {cleanupStatus && <div className="muted">{cleanupStatus}</div>}
-                <div className="row">
-                  <span>
-                    {selectedCleanup
-                      ? `${selectedCleanup.deleted_photos}/${selectedCleanup.total_photos} deleted`
-                      : "0/0 deleted"}
-                  </span>
-                  <button
-                    className="ghost"
-                    onClick={() => handleCleanupWeek(selectedWeek.id)}
-                  >
-                    Delete ImgBB images
-                  </button>
-                </div>
-              </div>
-              <div className="row-end">
-                <button
-                  className="danger"
-                  onClick={() => handleDeleteWeek(selectedWeek.id)}
-                >
-                  Delete record of week
-                </button>
-              </div>
-            </div>
-          )}
         </section>
       )}
 

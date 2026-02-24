@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { getServiceSupabase } from "@/lib/supabaseServer";
 import { requireAdmin } from "@/lib/auth";
 
 export async function DELETE(
@@ -8,20 +7,12 @@ export async function DELETE(
 ) {
   const unauthorized = await requireAdmin();
   if (unauthorized) return unauthorized;
-
-  const { id } = await params;
-  const supabase = getServiceSupabase();
-  const { error } = await supabase
-    .from("week_templates")
-    .delete()
-    .eq("id", id);
-
-  if (error) {
-    return NextResponse.json(
-      { error: "Failed to delete template." },
-      { status: 500 }
-    );
-  }
-
-  return NextResponse.json({ ok: true });
+  void params;
+  return NextResponse.json(
+    {
+      error:
+        "Week templates are deprecated. Schedule and assignment come from Google Sheets.",
+    },
+    { status: 410 }
+  );
 }
