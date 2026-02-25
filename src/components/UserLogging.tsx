@@ -140,6 +140,34 @@ export default function UserLogging() {
   const isSheetMode = true;
   const isBusy = pendingRequests > 0;
 
+  const underlineCurrentUserName = useCallback(
+    (text: string) => {
+      const normalizedUserName = userName.trim();
+      if (!text || !normalizedUserName) return text;
+      const escapedUserName = normalizedUserName.replace(
+        /[.*+?^${}()|[\]\\]/g,
+        "\\$&"
+      );
+      const matcher = new RegExp(`(${escapedUserName})`, "ig");
+      const parts = text.split(matcher);
+      if (parts.length <= 1) return text;
+      return parts.map((part, index) => {
+        if (part.toLowerCase() === normalizedUserName.toLowerCase()) {
+          return (
+            <span
+              key={`${part}-${index}`}
+              style={{ textDecoration: "underline", textUnderlineOffset: "2px" }}
+            >
+              {part}
+            </span>
+          );
+        }
+        return <span key={`${part}-${index}`}>{part}</span>;
+      });
+    },
+    [userName]
+  );
+
   const trackedFetch = useCallback(
     async (...args: Parameters<typeof fetch>) => {
       setPendingRequests((prev) => prev + 1);
@@ -807,7 +835,7 @@ export default function UserLogging() {
                           disabled={!actionable}
                         >
                           <div className="stack">
-                            {text && <div>{text}</div>}
+                            {text && <div>{underlineCurrentUserName(text)}</div>}
                           </div>
                         </button>
                       </div>
