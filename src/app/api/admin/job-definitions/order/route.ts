@@ -11,18 +11,73 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Order required." }, { status: 400 });
   }
 
-  const updates = orderedIds.map((id, index) => ({
-    id: String(id),
-    sort_order: index,
-  }));
+  const normalizedIds = orderedIds.map((id) => String(id));
+  if (new Set(normalizedIds).size !== normalizedIds.length) {
+    return NextResponse.json(
+      { error: "Duplicate job ids in reorder payload." },
+      { status: 400 }
+    );
+  }
 
   const supabase = getServiceSupabase();
-  const results = await Promise.all(
-    updates.map((update) =>
+  const { data: existing, error: existingError } = await supabase
+    .from("job_definitions")
+    .select("id, sort_order");
+  if (existingError) {
+    return NextResponse.json(
+      { error: "Failed to validate current job definitions." },
+      { status: 500 }
+    );
+  }
+
+  const existingIds = new Set((existing ?? []).map((row) => row.id));
+  if (
+    existingIds.size !== normalizedIds.length ||
+    normalizedIds.some((id) => !existingIds.has(id))
+  ) {
+    return NextResponse.json(
+      { error: "Reorder payload is stale. Refresh and try again." },
+      { status: 409 }
+    );
+  }
+
+  const maxCurrentOrder = Math.max(
+    -1,
+    ...(existing ?? []).map((row) =>
+      typeof row.sort_order === "number" ? row.sort_order : -1
+    )
+  );
+  const tempBase = maxCurrentOrder + normalizedIds.length + 1000;
+
+  const tempResults = await Promise.all(
+    normalizedIds.map((id, index) =>
       supabase
         .from("job_definitions")
-        .update({ sort_order: update.sort_order })
-        .eq("id", update.id)
+        .update({ sort_order: tempBase + index })
+        .eq("id", id)
+        .select("id, sort_order")
+        .single()
+    )
+  );
+
+  const tempFailed = tempResults.find((result) => result.error);
+  if (tempFailed?.error) {
+    return NextResponse.json(
+      {
+        error: "Failed to prepare reorder.",
+        details: tempFailed.error.message,
+        code: tempFailed.error.code,
+      },
+      { status: 500 }
+    );
+  }
+
+  const results = await Promise.all(
+    normalizedIds.map((id, index) =>
+      supabase
+        .from("job_definitions")
+        .update({ sort_order: index })
+        .eq("id", id)
         .select("id, sort_order")
         .single()
     )
