@@ -989,6 +989,17 @@ export default function AdminDashboard() {
     setJobEditorOpen(false);
   };
 
+  const handleMoveRequirement = (index: number, direction: -1 | 1) => {
+    const target = index + direction;
+    if (target < 0 || target >= editingRequirements.length) return;
+    setEditingRequirements((prev) => {
+      const next = prev.slice();
+      const [moved] = next.splice(index, 1);
+      next.splice(target, 0, moved);
+      return next;
+    });
+  };
+
   const handleCreateWeek = async () => {
     setError(null);
     const date = parseDateInput(startDate);
@@ -1928,9 +1939,36 @@ export default function AdminDashboard() {
               </button>
             </div>
             <div className="list">
-              {editingRequirements.map((req) => (
+              {editingRequirements.map((req, index) => (
                 <div key={req.id} className="list-row">
-                  <span>{req.description}</span>
+                  <input
+                    value={req.description}
+                    onChange={(event) =>
+                      setEditingRequirements((prev) =>
+                        prev.map((item) =>
+                          item.id === req.id
+                            ? { ...item, description: event.target.value }
+                            : item
+                        )
+                      )
+                    }
+                  />
+                  <button
+                    className="icon"
+                    onClick={() => handleMoveRequirement(index, -1)}
+                    disabled={index === 0}
+                    title="Move up"
+                  >
+                    ↑
+                  </button>
+                  <button
+                    className="icon"
+                    onClick={() => handleMoveRequirement(index, 1)}
+                    disabled={index === editingRequirements.length - 1}
+                    title="Move down"
+                  >
+                    ↓
+                  </button>
                   <button
                     className="icon"
                     onClick={() =>
