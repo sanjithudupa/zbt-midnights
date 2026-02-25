@@ -297,6 +297,8 @@ export default function AdminDashboard() {
   const [bulkUserNames, setBulkUserNames] = useState("");
   const [newJobName, setNewJobName] = useState("");
   const [dragJobIndex, setDragJobIndex] = useState<number | null>(null);
+  const [jobNameDrafts, setJobNameDrafts] = useState<Record<string, string>>({});
+  const [savingJobNameId, setSavingJobNameId] = useState<string | null>(null);
 
   const [startDate, setStartDate] = useState(formatDateInput(new Date()));
   const [createTemplateId, setCreateTemplateId] = useState<string>("");
@@ -546,6 +548,15 @@ export default function AdminDashboard() {
     if (response.ok) {
       const data = await response.json();
       setJobDefinitions(data.jobDefinitions ?? []);
+      setJobNameDrafts((prev) => {
+        const next = { ...prev };
+        for (const job of data.jobDefinitions ?? []) {
+          if (typeof next[job.id] !== "string") {
+            next[job.id] = job.name;
+          }
+        }
+        return next;
+      });
     }
   };
 
@@ -917,6 +928,23 @@ export default function AdminDashboard() {
     if (response.ok) {
       loadJobDefinitions();
     }
+  };
+
+  const handleSaveJobName = async (job: JobDefinition) => {
+    const nextName = (jobNameDrafts[job.id] ?? job.name).trim();
+    if (!nextName || nextName === job.name) return;
+    setSavingJobNameId(job.id);
+    await handleJobUpdate(job, { name: nextName });
+    setSavingJobNameId(null);
+  };
+
+  const handleMoveJob = (index: number, direction: -1 | 1) => {
+    const target = index + direction;
+    if (target < 0 || target >= orderedJobDefinitions.length) return;
+    const next = orderedJobDefinitions.slice();
+    const [moved] = next.splice(index, 1);
+    next.splice(target, 0, moved);
+    handleReorderJobs(next);
   };
 
   const handleRequirementsUpdate = async (
@@ -1523,11 +1551,46 @@ export default function AdminDashboard() {
                 onDragEnd={() => setDragJobIndex(null)}
               >
                 <div className="stack">
-                  <strong>{job.name}</strong>
+                  <input
+                    value={jobNameDrafts[job.id] ?? job.name}
+                    onChange={(event) =>
+                      setJobNameDrafts((prev) => ({
+                        ...prev,
+                        [job.id]: event.target.value,
+                      }))
+                    }
+                  />
                   <span className="muted">
                     {(job.job_requirements ?? []).length} photos required
                   </span>
                 </div>
+                <button
+                  className="ghost"
+                  onClick={() => handleSaveJobName(job)}
+                  disabled={
+                    savingJobNameId === job.id ||
+                    !(jobNameDrafts[job.id] ?? job.name).trim() ||
+                    (jobNameDrafts[job.id] ?? job.name).trim() === job.name
+                  }
+                >
+                  Save name
+                </button>
+                <button
+                  className="icon"
+                  onClick={() => handleMoveJob(index, -1)}
+                  disabled={index === 0}
+                  title="Move up"
+                >
+                  ↑
+                </button>
+                <button
+                  className="icon"
+                  onClick={() => handleMoveJob(index, 1)}
+                  disabled={index === orderedJobDefinitions.length - 1}
+                  title="Move down"
+                >
+                  ↓
+                </button>
                 <button className="icon drag-handle" title="Drag to reorder">
                   <IconDrag />
                 </button>

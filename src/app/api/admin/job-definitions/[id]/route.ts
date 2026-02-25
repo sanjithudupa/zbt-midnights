@@ -28,7 +28,7 @@ export async function PATCH(
     .from("job_definitions")
     .update(updates)
     .eq("id", id)
-    .select("id, name, created_at")
+    .select("id, name, created_at, sort_order")
     .single();
 
   if (error) {
