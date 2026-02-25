@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { requireUser } from "@/lib/auth";
 import { getMonday, formatDateInput } from "@/lib/date";
 import { DAY_LABELS } from "@/lib/constants";
 import { getServiceSupabase } from "@/lib/supabaseServer";
@@ -10,9 +9,6 @@ export const runtime = "nodejs";
 const dayKey = (day: number, jobDefinitionId: string) => `${day}:${jobDefinitionId}`;
 
 export async function GET(request: Request) {
-  const unauthorized = await requireUser();
-  if (unauthorized) return unauthorized;
-
   const { searchParams } = new URL(request.url);
   const startDate =
     searchParams.get("start_date") ?? formatDateInput(getMonday(new Date()));
