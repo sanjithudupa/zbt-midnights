@@ -12,6 +12,9 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const startDate =
     searchParams.get("start_date") ?? formatDateInput(getMonday(new Date()));
+  const verboseParam = searchParams.get("verbose")?.trim().toLowerCase();
+  const verbose =
+    verboseParam === "true" || verboseParam === "1" || verboseParam === "yes";
 
   try {
     const supabase = getServiceSupabase();
@@ -156,13 +159,42 @@ export async function GET(request: Request) {
       };
     });
 
+    if (verbose) {
+      return NextResponse.json({
+        week: {
+          id: week?.id ?? null,
+          start_date: startDate,
+          sheet_name: sheetResult.sheetName,
+        },
+        days,
+      });
+    }
+
+    const dayKeys = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const;
+    const compactDays = Object.fromEntries(
+      dayKeys.map((key, index) => {
+        const day = days[index];
+        const remainingJobs = Object.fromEntries(
+          (day?.jobs ?? [])
+            .filter((job) => job.enabled && job.submission_status === "none")
+            .map((job) => {
+              const assigned = job.assigned_to?.trim() ?? "";
+              const value = job.is_rng
+                ? assigned && assigned.toUpperCase() !== "RNG"
+                  ? `RNG (${assigned})`
+                  : "RNG"
+                : assigned || "UNASSIGNED";
+              return [job.job_name, value];
+            })
+        );
+        return [key, { remaining_jobs: remainingJobs }];
+      })
+    );
+
     return NextResponse.json({
-      week: {
-        id: week?.id ?? null,
-        start_date: startDate,
-        sheet_name: sheetResult.sheetName,
-      },
-      days,
+      start_date: startDate,
+      sheet_name: sheetResult.sheetName,
+      days: compactDays,
     });
   } catch (error) {
     return NextResponse.json(
