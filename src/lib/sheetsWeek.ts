@@ -6,6 +6,7 @@ import {
   getSpreadsheetId,
   listSheetNames,
   updateSheetCell,
+  writeSheetProtectionStatusCell,
 } from "./googleSheets";
 
 const SHEET_NAMES_TTL_MS = 60_000;
@@ -237,6 +238,13 @@ export async function setWeekSheetProtection(args: {
     mode: args.mode,
     jobCount,
     allowedEmails: args.alwaysAllowedGmails,
+  });
+  const statusRowNumber = jobCount + 3;
+  await writeSheetProtectionStatusCell({
+    spreadsheetId,
+    sheetName,
+    rowNumber: statusRowNumber,
+    mode: args.mode,
   });
 
   return {

@@ -247,6 +247,80 @@ export async function applySheetProtectionMode(args: {
   };
 }
 
+export async function writeSheetProtectionStatusCell(args: {
+  spreadsheetId: string;
+  sheetName: string;
+  rowNumber: number;
+  mode: "full_protected" | "signup_open";
+}) {
+  const sheets = getSheetsClient();
+  const meta = await getSheetMeta(args.spreadsheetId, args.sheetName);
+  const statusText = args.mode === "full_protected" ? "LOCKED" : "SIGNUPS OPEN";
+  const fullText = `Status: ${statusText}`;
+  const statusStart = "Status: ".length;
+
+  await sheets.spreadsheets.batchUpdate({
+    spreadsheetId: args.spreadsheetId,
+    requestBody: {
+      requests: [
+        {
+          updateCells: {
+            range: {
+              sheetId: meta.sheetId,
+              startRowIndex: Math.max(0, args.rowNumber - 1),
+              endRowIndex: Math.max(0, args.rowNumber),
+              startColumnIndex: 0,
+              endColumnIndex: 1,
+            },
+            rows: [
+              {
+                values: [
+                  {
+                    userEnteredValue: { stringValue: fullText },
+                    userEnteredFormat: {
+                      textFormat: {
+                        bold: true,
+                        foregroundColor: {
+                          red: 0,
+                          green: 0,
+                          blue: 0,
+                        },
+                      },
+                    },
+                    textFormatRuns: [
+                      {
+                        startIndex: 0,
+                        format: {
+                          foregroundColor: {
+                            red: 0,
+                            green: 0,
+                            blue: 0,
+                          },
+                        },
+                      },
+                      {
+                        startIndex: statusStart,
+                        format: {
+                          foregroundColor:
+                            args.mode === "full_protected"
+                              ? { red: 0.8, green: 0.1, blue: 0.1 }
+                              : { red: 0.1, green: 0.55, blue: 0.2 },
+                        },
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+            fields:
+              "userEnteredValue,userEnteredFormat.textFormat.bold,userEnteredFormat.textFormat.foregroundColor,textFormatRuns",
+          },
+        },
+      ],
+    },
+  });
+}
+
 export async function getSheetProtectionMode(
   spreadsheetId: string,
   sheetName: string
