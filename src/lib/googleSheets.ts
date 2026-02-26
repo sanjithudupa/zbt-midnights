@@ -152,7 +152,11 @@ export async function getSheetMeta(spreadsheetId: string, sheetName: string) {
   const sheet = response.data.sheets?.find(
     (item) => item.properties?.title === sheetName
   );
-  if (!sheet?.properties?.sheetId) {
+  if (
+    !sheet?.properties ||
+    sheet.properties.sheetId === undefined ||
+    sheet.properties.sheetId === null
+  ) {
     throw new Error(`Sheet not found: ${sheetName}`);
   }
 
@@ -177,12 +181,14 @@ export async function applySheetProtectionMode(args: {
   const meta = await getSheetMeta(args.spreadsheetId, args.sheetName);
   const requests: Array<Record<string, unknown>> = [];
 
+  let deletedProtectionCount = 0;
   for (const protection of meta.protectedRanges) {
     const description = protection.description ?? "";
     if (
       description.startsWith(PROTECTION_DESCRIPTION_PREFIX) &&
       protection.protectedRangeId
     ) {
+      deletedProtectionCount += 1;
       requests.push({
         deleteProtectedRange: {
           protectedRangeId: protection.protectedRangeId,
@@ -237,8 +243,45 @@ export async function applySheetProtectionMode(args: {
   return {
     appliedMode: args.mode,
     addedProtectionId: added ?? null,
-    deletedProtectionCount: requests.length > 0 ? requests.length - 1 : 0,
+    deletedProtectionCount,
   };
+}
+
+export async function getSheetProtectionMode(
+  spreadsheetId: string,
+  sheetName: string
+) {
+  const meta = await getSheetMeta(spreadsheetId, sheetName);
+  const matching = meta.protectedRanges.find((protection) =>
+    (protection.description ?? "").startsWith(
+      `${PROTECTION_DESCRIPTION_PREFIX}${sheetName}`
+    )
+  );
+  if (!matching) {
+    return "none" as const;
+  }
+
+  const ranges = matching.unprotectedRanges ?? [];
+  if (ranges.length === 0) {
+    return "full_protected" as const;
+  }
+
+  const signature = new Set(
+    ranges.map(
+      (range) =>
+        `${range.startColumnIndex ?? -1}:${range.endColumnIndex ?? -1}:${
+          range.startRowIndex ?? -1
+        }:${range.endRowIndex ?? -1}`
+    )
+  );
+  const expectedColumns = [2, 4, 6, 8, 10, 12, 14];
+  const isSignupShape =
+    signature.size === expectedColumns.length &&
+    expectedColumns.every((column) =>
+      Array.from(signature).some((key) => key.startsWith(`${column}:${column + 1}:2:`))
+    );
+
+  return isSignupShape ? ("signup_open" as const) : ("full_protected" as const);
 }
 
 function columnNumberToName(columnNumber: number) {

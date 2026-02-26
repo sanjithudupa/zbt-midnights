@@ -95,6 +95,14 @@ type CleanupSummaryRow = {
   deleted_photos: number;
 };
 
+type SheetWeekRow = {
+  sheet_name: string;
+  start_date: string;
+  protection_mode: "none" | "full_protected" | "signup_open";
+  has_week_record: boolean;
+  week_id: string | null;
+};
+
 const selectionKey = (day: number, jobId: string) => `${day}:${jobId}`;
 
 const IconEdit = () => (
@@ -324,6 +332,8 @@ export default function AdminDashboard() {
   const [cleanupStatus, setCleanupStatus] = useState<string | null>(null);
   const [weekSetupStatus, setWeekSetupStatus] = useState<string | null>(null);
   const [weekSetupLoading, setWeekSetupLoading] = useState(false);
+  const [sheetWeeks, setSheetWeeks] = useState<SheetWeekRow[]>([]);
+  const [selectedSetupStartDate, setSelectedSetupStartDate] = useState("");
   const [settingsStatus, setSettingsStatus] = useState<string | null>(null);
   const [settingsInitial, setSettingsInitial] = useState<{
     scheduleSource: "database" | "google sheet";
@@ -382,6 +392,9 @@ export default function AdminDashboard() {
   const [requirementInput, setRequirementInput] = useState("");
 
   const selectedWeek = weeks.find((week) => week.id === selectedWeekId);
+  const selectedSetupWeek = sheetWeeks.find(
+    (week) => week.start_date === selectedSetupStartDate
+  );
 
   const sheetDerived = useMemo(() => {
     if (!isSheetMode || !sheetWeekData) return null;
@@ -477,6 +490,7 @@ export default function AdminDashboard() {
         loadUsers(),
         loadJobDefinitions(),
         loadWeeks(),
+        loadSheetWeeks(),
         loadTemplates(),
         loadSettingsFlags(),
       ]);
@@ -597,6 +611,17 @@ export default function AdminDashboard() {
       if (!selectedTemplateId && data.weekTemplates?.length) {
         setSelectedTemplateId(data.weekTemplates[0].id);
       }
+    }
+  };
+
+  const loadSheetWeeks = async () => {
+    const response = await trackedFetch("/api/admin/sheets/weeks");
+    if (!response.ok) return;
+    const data = await response.json();
+    const list: SheetWeekRow[] = data.sheetWeeks ?? [];
+    setSheetWeeks(list);
+    if (!selectedSetupStartDate && list.length > 0) {
+      setSelectedSetupStartDate(list[0].start_date);
     }
   };
 
@@ -1249,7 +1274,7 @@ export default function AdminDashboard() {
   };
 
   const handleSetSheetProtection = async (mode: "full_protected" | "signup_open") => {
-    if (!selectedWeek?.start_date) {
+    if (!selectedSetupStartDate) {
       setWeekSetupStatus("Select a week first.");
       return;
     }
@@ -1259,7 +1284,7 @@ export default function AdminDashboard() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        start_date: selectedWeek.start_date,
+        start_date: selectedSetupStartDate,
         mode,
       }),
     });
@@ -1272,6 +1297,35 @@ export default function AdminDashboard() {
     setWeekSetupStatus(
       `Updated ${data.sheetName} to ${mode} (${data.jobCount} jobs).`
     );
+    await loadSheetWeeks();
+  };
+
+  const handleCreateWeekFromSheet = async () => {
+    if (!selectedSetupStartDate) {
+      setWeekSetupStatus("Select a week first.");
+      return;
+    }
+    setWeekSetupLoading(true);
+    setWeekSetupStatus(null);
+    const response = await trackedFetch("/api/admin/weeks/from-sheet", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        start_date: selectedSetupStartDate,
+      }),
+    });
+    setWeekSetupLoading(false);
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      setWeekSetupStatus(data.error ?? "Failed to create week record.");
+      return;
+    }
+    setWeekSetupStatus(
+      data.created
+        ? `Created week record for ${selectedSetupStartDate}.`
+        : `Week record already exists for ${selectedSetupStartDate}.`
+    );
+    await Promise.all([loadWeeks(), loadSheetWeeks()]);
   };
 
   const handleOpenDetail = (
@@ -1596,32 +1650,58 @@ export default function AdminDashboard() {
               <span>Select week</span>
               <select
                 className="flat-select"
-                value={selectedWeekId}
-                onChange={(event) => setSelectedWeekId(event.target.value)}
+                value={selectedSetupStartDate}
+                onChange={(event) => setSelectedSetupStartDate(event.target.value)}
               >
                 <option value="">Select week</option>
-                {weeks.map((week) => (
-                  <option key={week.id} value={week.id}>
-                    {week.start_date}
+                {sheetWeeks.map((week) => (
+                  <option key={week.start_date} value={week.start_date}>
+                    {week.start_date} ({week.sheet_name})
                   </option>
                 ))}
               </select>
             </label>
+            {selectedSetupWeek && (
+              <div className="stack">
+                <div className="muted">
+                  Current protection mode:{" "}
+                  <strong>{selectedSetupWeek.protection_mode}</strong>
+                </div>
+                <div className="muted">
+                  Database week record:{" "}
+                  <strong>
+                    {selectedSetupWeek.has_week_record ? "exists" : "missing"}
+                  </strong>
+                </div>
+              </div>
+            )}
             {weekSetupStatus && <div className="muted">{weekSetupStatus}</div>}
             <div className="row">
               <button
                 className="primary"
-                disabled={!selectedWeekId || weekSetupLoading || isBusy}
+                disabled={!selectedSetupStartDate || weekSetupLoading || isBusy}
                 onClick={() => void handleSetSheetProtection("full_protected")}
               >
                 {weekSetupLoading ? "Updating..." : "Protect Entire Sheet"}
               </button>
               <button
                 className="ghost"
-                disabled={!selectedWeekId || weekSetupLoading || isBusy}
+                disabled={!selectedSetupStartDate || weekSetupLoading || isBusy}
                 onClick={() => void handleSetSheetProtection("signup_open")}
               >
                 {weekSetupLoading ? "Updating..." : "Open Signup Cells Only"}
+              </button>
+              <button
+                className="ghost"
+                disabled={
+                  !selectedSetupStartDate ||
+                  weekSetupLoading ||
+                  isBusy ||
+                  Boolean(selectedSetupWeek?.has_week_record)
+                }
+                onClick={() => void handleCreateWeekFromSheet()}
+              >
+                {weekSetupLoading ? "Working..." : "Create Week Record"}
               </button>
             </div>
             <div className="muted">

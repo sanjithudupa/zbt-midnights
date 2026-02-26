@@ -48,6 +48,21 @@ export async function POST(request: Request) {
     );
   }
 
+  let normalizedAlwaysAllowed:
+    | { emails: string[]; invalid: string[] }
+    | null = null;
+  if (typeof alwaysAllowedGmails === "string") {
+    normalizedAlwaysAllowed = normalizeAlwaysAllowedGmails(alwaysAllowedGmails);
+    if (normalizedAlwaysAllowed.invalid.length > 0) {
+      return NextResponse.json(
+        {
+          error: `Invalid email(s): ${normalizedAlwaysAllowed.invalid.join(", ")}`,
+        },
+        { status: 400 }
+      );
+    }
+  }
+
   if (typeof adminPassword === "string" && adminPassword.trim()) {
     const hash = await bcrypt.hash(adminPassword.trim(), 10);
     await setAdminSetting("admin_password_hash", hash);
@@ -72,17 +87,11 @@ export async function POST(request: Request) {
     await setAdminSetting("schedule_source_of_truth", value);
   }
 
-  if (typeof alwaysAllowedGmails === "string") {
-    const normalized = normalizeAlwaysAllowedGmails(alwaysAllowedGmails);
-    if (normalized.invalid.length > 0) {
-      return NextResponse.json(
-        {
-          error: `Invalid email(s): ${normalized.invalid.join(", ")}`,
-        },
-        { status: 400 }
-      );
-    }
-    await setAdminSetting("always_allowed_gmails", normalized.emails.join("\n"));
+  if (normalizedAlwaysAllowed) {
+    await setAdminSetting(
+      "always_allowed_gmails",
+      normalizedAlwaysAllowed.emails.join("\n")
+    );
   }
 
   return NextResponse.json({ ok: true });

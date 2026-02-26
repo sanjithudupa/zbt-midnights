@@ -1,6 +1,7 @@
 import { getAdminSetting } from "./adminSettings";
 import {
   applySheetProtectionMode,
+  getSheetProtectionMode,
   getSheetValues,
   getSpreadsheetId,
   listSheetNames,
@@ -23,6 +24,46 @@ function formatSheetPrefix(startDate: string) {
   const [year, month, day] = startDate.split("-").map(Number);
   if (!year || !month || !day) return null;
   return `${month}/${day}`;
+}
+
+async function resolveSpreadsheetIdFromSettings() {
+  const sheetsUrl = await getAdminSetting("SHEETS_URL");
+  if (!sheetsUrl || typeof sheetsUrl !== "string") {
+    throw new Error("Missing SHEETS_URL.");
+  }
+
+  const spreadsheetId = getSpreadsheetId(sheetsUrl);
+  if (!spreadsheetId) {
+    throw new Error("Invalid SHEETS_URL.");
+  }
+  return spreadsheetId;
+}
+
+function inferStartDateFromSheetName(name: string, now = new Date()) {
+  const [left] = name.split("-");
+  const trimmed = left?.trim() ?? "";
+  const match = trimmed.match(/^(\d{1,2})\/(\d{1,2})$/);
+  if (!match) return null;
+  const month = Number(match[1]);
+  const day = Number(match[2]);
+  if (!month || !day) return null;
+
+  const years = [now.getFullYear() - 1, now.getFullYear(), now.getFullYear() + 1];
+  const candidates = years
+    .map((year) => new Date(year, month - 1, day))
+    .filter((date) => date.getMonth() + 1 === month && date.getDate() === day);
+  if (!candidates.length) return null;
+
+  const mondayCandidates = candidates.filter((date) => date.getDay() === 1);
+  const pickFrom = mondayCandidates.length ? mondayCandidates : candidates;
+  const picked = pickFrom.sort(
+    (a, b) => Math.abs(a.getTime() - now.getTime()) - Math.abs(b.getTime() - now.getTime())
+  )[0];
+
+  const year = picked.getFullYear();
+  const mm = String(picked.getMonth() + 1).padStart(2, "0");
+  const dd = String(picked.getDate()).padStart(2, "0");
+  return `${year}-${mm}-${dd}`;
 }
 
 async function getCachedSheetNames(spreadsheetId: string) {
@@ -63,15 +104,7 @@ function processSheetValues(values: string[][]) {
 }
 
 export async function getWeekSheetData(startDate: string) {
-  const sheetsUrl = await getAdminSetting("SHEETS_URL");
-  if (!sheetsUrl || typeof sheetsUrl !== "string") {
-    throw new Error("Missing SHEETS_URL.");
-  }
-
-  const spreadsheetId = getSpreadsheetId(sheetsUrl);
-  if (!spreadsheetId) {
-    throw new Error("Invalid SHEETS_URL.");
-  }
+  const spreadsheetId = await resolveSpreadsheetIdFromSettings();
 
   const cacheKey = `${spreadsheetId}:${startDate}`;
   const cached = weekDataCache.get(cacheKey);
@@ -112,15 +145,7 @@ export async function updateWeekSheetState(args: {
   dayIndex: number;
   state: string;
 }) {
-  const sheetsUrl = await getAdminSetting("SHEETS_URL");
-  if (!sheetsUrl || typeof sheetsUrl !== "string") {
-    throw new Error("Missing SHEETS_URL.");
-  }
-
-  const spreadsheetId = getSpreadsheetId(sheetsUrl);
-  if (!spreadsheetId) {
-    throw new Error("Invalid SHEETS_URL.");
-  }
+  const spreadsheetId = await resolveSpreadsheetIdFromSettings();
 
   const { sheetName, data } = await getWeekSheetData(args.startDate);
   const jobIndex = (data[0] ?? []).findIndex((name) => name === args.jobName);
@@ -158,15 +183,7 @@ export async function updateWeekSheetVerification(args: {
   dayIndex: number;
   username: string;
 }) {
-  const sheetsUrl = await getAdminSetting("SHEETS_URL");
-  if (!sheetsUrl || typeof sheetsUrl !== "string") {
-    throw new Error("Missing SHEETS_URL.");
-  }
-
-  const spreadsheetId = getSpreadsheetId(sheetsUrl);
-  if (!spreadsheetId) {
-    throw new Error("Invalid SHEETS_URL.");
-  }
+  const spreadsheetId = await resolveSpreadsheetIdFromSettings();
 
   const { sheetName, data } = await getWeekSheetData(args.startDate);
   const jobIndex = (data[0] ?? []).findIndex((name) => name === args.jobName);
@@ -210,15 +227,7 @@ export async function setWeekSheetProtection(args: {
   mode: "full_protected" | "signup_open";
   alwaysAllowedGmails: string[];
 }) {
-  const sheetsUrl = await getAdminSetting("SHEETS_URL");
-  if (!sheetsUrl || typeof sheetsUrl !== "string") {
-    throw new Error("Missing SHEETS_URL.");
-  }
-
-  const spreadsheetId = getSpreadsheetId(sheetsUrl);
-  if (!spreadsheetId) {
-    throw new Error("Invalid SHEETS_URL.");
-  }
+  const spreadsheetId = await resolveSpreadsheetIdFromSettings();
 
   const { sheetName, data } = await getWeekSheetData(args.startDate);
   const jobCount = (data[0] ?? []).length;
@@ -236,4 +245,35 @@ export async function setWeekSheetProtection(args: {
     mode: args.mode,
     details,
   };
+}
+
+export async function listSheetWeeks(): Promise<
+  Array<{
+    sheetName: string;
+    startDate: string;
+    protectionMode: "none" | "full_protected" | "signup_open";
+  }>
+> {
+  const spreadsheetId = await resolveSpreadsheetIdFromSettings();
+  const names = await getCachedSheetNames(spreadsheetId);
+  const now = new Date();
+
+  const rows: Array<{
+    sheetName: string;
+    startDate: string;
+    protectionMode: "none" | "full_protected" | "signup_open";
+  }> = [];
+
+  for (const sheetName of names) {
+    const startDate = inferStartDateFromSheetName(sheetName, now);
+    if (!startDate) continue;
+    const protectionMode = await getSheetProtectionMode(spreadsheetId, sheetName);
+    rows.push({
+      sheetName,
+      startDate,
+      protectionMode,
+    });
+  }
+
+  return rows.sort((a, b) => b.startDate.localeCompare(a.startDate));
 }
