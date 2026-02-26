@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { requireAdmin } from "@/lib/auth";
 import { getAdminSetting, setAdminSetting } from "@/lib/adminSettings";
+import { normalizeAlwaysAllowedGmails } from "@/lib/sheetsProtection";
 
 export async function GET() {
   const unauthorized = await requireAdmin();
@@ -12,6 +13,8 @@ export async function GET() {
   const sheetsUrl = await getAdminSetting("SHEETS_URL");
   const scheduleSource =
     (await getAdminSetting("schedule_source_of_truth")) ?? "database";
+  const alwaysAllowedGmails =
+    (await getAdminSetting("always_allowed_gmails")) ?? "";
 
   return NextResponse.json({
     settings: {
@@ -19,6 +22,7 @@ export async function GET() {
       hasImgbbKey: Boolean(imgbbKey),
       hasSheetsUrl: Boolean(sheetsUrl),
       scheduleSourceOfTruth: scheduleSource,
+      alwaysAllowedGmails,
     },
   });
 }
@@ -28,8 +32,14 @@ export async function POST(request: Request) {
   if (unauthorized) return unauthorized;
 
   const body = await request.json();
-  const { adminPassword, imgbbApiKey, sheetsUrl, scheduleSourceOfTruth, masterPassword } =
-    body ?? {};
+  const {
+    adminPassword,
+    imgbbApiKey,
+    sheetsUrl,
+    scheduleSourceOfTruth,
+    alwaysAllowedGmails,
+    masterPassword,
+  } = body ?? {};
   const master = process.env.ADMIN_UPDATE_MASTER_PASSWORD;
   if (!master || masterPassword !== master) {
     return NextResponse.json(
@@ -60,6 +70,19 @@ export async function POST(request: Request) {
       );
     }
     await setAdminSetting("schedule_source_of_truth", value);
+  }
+
+  if (typeof alwaysAllowedGmails === "string") {
+    const normalized = normalizeAlwaysAllowedGmails(alwaysAllowedGmails);
+    if (normalized.invalid.length > 0) {
+      return NextResponse.json(
+        {
+          error: `Invalid email(s): ${normalized.invalid.join(", ")}`,
+        },
+        { status: 400 }
+      );
+    }
+    await setAdminSetting("always_allowed_gmails", normalized.emails.join("\n"));
   }
 
   return NextResponse.json({ ok: true });

@@ -1,5 +1,6 @@
 import { getAdminSetting } from "./adminSettings";
 import {
+  applySheetProtectionMode,
   getSheetValues,
   getSpreadsheetId,
   listSheetNames,
@@ -202,4 +203,37 @@ export async function updateWeekSheetVerification(args: {
       expiresAt: Date.now() + WEEK_DATA_TTL_MS,
     });
   }
+}
+
+export async function setWeekSheetProtection(args: {
+  startDate: string;
+  mode: "full_protected" | "signup_open";
+  alwaysAllowedGmails: string[];
+}) {
+  const sheetsUrl = await getAdminSetting("SHEETS_URL");
+  if (!sheetsUrl || typeof sheetsUrl !== "string") {
+    throw new Error("Missing SHEETS_URL.");
+  }
+
+  const spreadsheetId = getSpreadsheetId(sheetsUrl);
+  if (!spreadsheetId) {
+    throw new Error("Invalid SHEETS_URL.");
+  }
+
+  const { sheetName, data } = await getWeekSheetData(args.startDate);
+  const jobCount = (data[0] ?? []).length;
+  const details = await applySheetProtectionMode({
+    spreadsheetId,
+    sheetName,
+    mode: args.mode,
+    jobCount,
+    allowedEmails: args.alwaysAllowedGmails,
+  });
+
+  return {
+    sheetName,
+    jobCount,
+    mode: args.mode,
+    details,
+  };
 }
