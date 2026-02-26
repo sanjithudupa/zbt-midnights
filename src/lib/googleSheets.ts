@@ -218,10 +218,6 @@ export async function applySheetProtectionMode(args: {
         warningOnly: false,
         range: {
           sheetId: meta.sheetId,
-          startRowIndex: 0,
-          endRowIndex: meta.rowCount,
-          startColumnIndex: 0,
-          endColumnIndex: meta.columnCount,
         },
         unprotectedRanges,
         editors: {
