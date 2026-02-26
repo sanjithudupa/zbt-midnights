@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getMonday, formatDateInput } from "@/lib/date";
+import { getMonday, formatDateInput, getDayIndex } from "@/lib/date";
 import { DAY_LABELS } from "@/lib/constants";
 import { getServiceSupabase } from "@/lib/supabaseServer";
 import { getWeekSheetData } from "@/lib/sheetsWeek";
@@ -15,6 +15,40 @@ export async function GET(request: Request) {
   const verboseParam = searchParams.get("verbose")?.trim().toLowerCase();
   const verbose =
     verboseParam === "true" || verboseParam === "1" || verboseParam === "yes";
+  const dayParam = searchParams.get("day")?.trim().toLowerCase() ?? "";
+  const dayKeys = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const;
+  const dayAliases = new Map<string, number>([
+    ["mon", 0],
+    ["monday", 0],
+    ["tue", 1],
+    ["tues", 1],
+    ["tuesday", 1],
+    ["wed", 2],
+    ["wednesday", 2],
+    ["thu", 3],
+    ["thur", 3],
+    ["thurs", 3],
+    ["thursday", 3],
+    ["fri", 4],
+    ["friday", 4],
+    ["sat", 5],
+    ["saturday", 5],
+    ["sun", 6],
+    ["sunday", 6],
+    ["0", 0],
+    ["1", 1],
+    ["2", 2],
+    ["3", 3],
+    ["4", 4],
+    ["5", 5],
+    ["6", 6],
+  ]);
+  const selectedDayIndex =
+    dayParam && dayParam !== "all"
+      ? dayAliases.get(dayParam) ?? getDayIndex(new Date())
+      : dayParam === "all"
+        ? null
+        : getDayIndex(new Date());
 
   try {
     const supabase = getServiceSupabase();
@@ -159,6 +193,11 @@ export async function GET(request: Request) {
       };
     });
 
+    const filteredDays =
+      selectedDayIndex === null
+        ? days
+        : days.filter((day) => day.day_index === selectedDayIndex);
+
     if (verbose) {
       return NextResponse.json({
         week: {
@@ -166,14 +205,16 @@ export async function GET(request: Request) {
           start_date: startDate,
           sheet_name: sheetResult.sheetName,
         },
-        days,
+        days: filteredDays,
       });
     }
 
-    const dayKeys = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const;
     const compactDays = Object.fromEntries(
-      dayKeys.map((key, index) => {
-        const day = days[index];
+      dayKeys
+        .map((key, index) => ({ key, index }))
+        .filter(({ index }) => selectedDayIndex === null || index === selectedDayIndex)
+        .map(({ key, index }) => {
+          const day = days[index];
         const remainingJobs = Object.fromEntries(
           (day?.jobs ?? [])
             .filter((job) => job.enabled && job.submission_status === "none")
@@ -187,8 +228,8 @@ export async function GET(request: Request) {
               return [job.job_name, value];
             })
         );
-        return [key, { remaining_jobs: remainingJobs }];
-      })
+          return [key, { remaining_jobs: remainingJobs }];
+        })
     );
 
     return NextResponse.json({
