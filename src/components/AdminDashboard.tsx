@@ -620,6 +620,14 @@ export default function AdminDashboard() {
     const data = await response.json();
     const list: SheetWeekRow[] = data.sheetWeeks ?? [];
     setSheetWeeks(list);
+    if (list.length > 0) {
+      const mondayString = formatDateInput(getMonday(new Date()));
+      const currentWeek = list.find((week) => week.start_date === mondayString);
+      if (currentWeek) {
+        setSelectedSetupStartDate(currentWeek.start_date);
+        return;
+      }
+    }
     if (!selectedSetupStartDate && list.length > 0) {
       setSelectedSetupStartDate(list[0].start_date);
     }
