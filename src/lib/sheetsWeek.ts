@@ -88,7 +88,15 @@ function processSheetValues(values: string[][]) {
   );
   const limited = transposed.slice(0, 16);
   const firstColumn = limited[0] ?? [];
-  let cutoff = firstColumn.findIndex((value) => value === "");
+  let cutoff = firstColumn.findIndex((value) => {
+    const normalized = (value ?? "").trim();
+    if (!normalized) return true;
+    if (normalized.startsWith("Status:")) {
+      const statusText = normalized.slice("Status:".length).trim();
+      return statusText.length > 0;
+    }
+    return false;
+  });
   if (cutoff < 0) cutoff = firstColumn.length;
   const trimmed = limited.map((column) => column.slice(0, cutoff));
   const jobNames = trimmed[0] ?? [];
@@ -239,7 +247,15 @@ export async function setWeekSheetProtection(args: {
     jobCount,
     allowedEmails: args.alwaysAllowedGmails,
   });
-  const statusRowNumber = jobCount + 3;
+  const values = await getSheetValues(spreadsheetId, sheetName);
+  const bodyRows = values.slice(2);
+  const existingStatusIndex = bodyRows.findIndex((row) =>
+    String(row?.[0] ?? "")
+      .trim()
+      .startsWith("Status:")
+  );
+  const statusRowNumber =
+    existingStatusIndex >= 0 ? existingStatusIndex + 3 : jobCount + 3;
   await writeSheetProtectionStatusCell({
     spreadsheetId,
     sheetName,
