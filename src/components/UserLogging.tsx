@@ -748,6 +748,7 @@ export default function UserLogging() {
                       ? sheetSelections?.states?.get(key) ?? ""
                       : "";
                     const normalizedState = sheetState.trim().toUpperCase();
+                    const isTriplePunt = normalizedState === "P";
                     const assignedName = isSheetMode
                       ? sheetSelections?.assignments?.get(key) ?? ""
                       : "";
@@ -769,13 +770,22 @@ export default function UserLogging() {
                       : "";
                     const statusClass = isVerified
                       ? "complete"
+                      : isTriplePunt
+                        ? "punted"
                       : effectiveComplete
                         ? "complete-admin"
                         : isOn
                           ? "scheduled"
                           : "not-scheduled";
-                    const text = effectiveComplete ? label : assignedLabel;
-                    const actionable = isOn && !effectiveComplete && !job.missing;
+                    const text = isTriplePunt
+                      ? assignedName
+                        ? `3x punt: ${assignedName}`
+                        : "3x punt"
+                      : effectiveComplete
+                        ? label
+                        : assignedLabel;
+                    const actionable =
+                      isOn && !effectiveComplete && !job.missing && !isTriplePunt;
                     const isSelected = actionable
                       ? isSheetMode
                         ? selectedCellKey === key

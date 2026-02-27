@@ -9,6 +9,7 @@ type ServiceAccountKey = {
 };
 
 const SHEETS_SCOPES = ["https://www.googleapis.com/auth/spreadsheets"];
+const PROTECTION_DESCRIPTION_PREFIX = "MIDNIGHTS_PROTECTION::";
 
 export function getSpreadsheetId(input: string): string | null {
   if (!input) return null;
@@ -140,6 +141,178 @@ export async function updateSheetCell(
     },
   });
 }
+
+export async function getSheetMeta(spreadsheetId: string, sheetName: string) {
+  const sheets = getSheetsClient();
+  const response = await sheets.spreadsheets.get({
+    spreadsheetId,
+    fields:
+      "sheets(properties(sheetId,title,gridProperties(rowCount,columnCount)),protectedRanges(range,description,protectedRangeId))",
+  });
+  const sheet = response.data.sheets?.find(
+    (item) => item.properties?.title === sheetName
+  );
+  if (
+    !sheet?.properties ||
+    sheet.properties.sheetId === undefined ||
+    sheet.properties.sheetId === null
+  ) {
+    throw new Error(`Sheet not found: ${sheetName}`);
+  }
+
+  const rowCount = sheet.properties.gridProperties?.rowCount ?? 1000;
+  const columnCount = sheet.properties.gridProperties?.columnCount ?? 26;
+  return {
+    sheetId: sheet.properties.sheetId,
+    rowCount,
+    columnCount,
+    protectedRanges: sheet.protectedRanges ?? [],
+  };
+}
+
+export async function applySheetProtectionMode(args: {
+  spreadsheetId: string;
+  sheetName: string;
+  mode: "full_protected" | "signup_open";
+  jobCount: number;
+  allowedEmails: string[];
+}) {
+  const sheets = getSheetsClient();
+  const meta = await getSheetMeta(args.spreadsheetId, args.sheetName);
+  const requests: Array<Record<string, unknown>> = [];
+
+  let deletedProtectionCount = 0;
+  for (const protection of meta.protectedRanges) {
+    if (protection.protectedRangeId) {
+      deletedProtectionCount += 1;
+      requests.push({
+        deleteProtectedRange: {
+          protectedRangeId: protection.protectedRangeId,
+        },
+      });
+    }
+  }
+
+  const signupColumns = [2, 4, 6, 8, 10, 12, 14];
+  const startRowIndex = 2;
+  const endRowIndex = startRowIndex + Math.max(0, args.jobCount);
+  const unprotectedRanges =
+    args.mode === "signup_open" && args.jobCount > 0
+      ? signupColumns.map((columnIndex) => ({
+          sheetId: meta.sheetId,
+          startRowIndex,
+          endRowIndex,
+          startColumnIndex: columnIndex,
+          endColumnIndex: columnIndex + 1,
+        }))
+      : [];
+
+  requests.push({
+    addProtectedRange: {
+      protectedRange: {
+        description: `${PROTECTION_DESCRIPTION_PREFIX}${args.sheetName}`,
+        warningOnly: false,
+        range: {
+          sheetId: meta.sheetId,
+        },
+        unprotectedRanges,
+        editors: {
+          users: args.allowedEmails,
+        },
+      },
+    },
+  });
+
+  const response = await sheets.spreadsheets.batchUpdate({
+    spreadsheetId: args.spreadsheetId,
+    requestBody: { requests },
+  });
+  const replies = response.data.replies ?? [];
+  const added = replies
+    .map((reply) => reply.addProtectedRange?.protectedRange?.protectedRangeId)
+    .find((value) => typeof value === "number");
+
+  return {
+    appliedMode: args.mode,
+    addedProtectionId: added ?? null,
+    deletedProtectionCount,
+  };
+}
+
+export async function writeSheetProtectionStatusCell(args: {
+  spreadsheetId: string;
+  sheetName: string;
+  rowNumber: number;
+  mode: "full_protected" | "signup_open";
+}) {
+  const sheets = getSheetsClient();
+  const meta = await getSheetMeta(args.spreadsheetId, args.sheetName);
+  const statusText = args.mode === "full_protected" ? "LOCKED" : "SIGNUPS OPEN";
+  const fullText = `Status: ${statusText}`;
+  const statusStart = "Status: ".length;
+
+  await sheets.spreadsheets.batchUpdate({
+    spreadsheetId: args.spreadsheetId,
+    requestBody: {
+      requests: [
+        {
+          updateCells: {
+            range: {
+              sheetId: meta.sheetId,
+              startRowIndex: Math.max(0, args.rowNumber - 1),
+              endRowIndex: Math.max(0, args.rowNumber),
+              startColumnIndex: 0,
+              endColumnIndex: 1,
+            },
+            rows: [
+              {
+                values: [
+                  {
+                    userEnteredValue: { stringValue: fullText },
+                    userEnteredFormat: {
+                      textFormat: {
+                        bold: true,
+                        foregroundColor: {
+                          red: 0,
+                          green: 0,
+                          blue: 0,
+                        },
+                      },
+                    },
+                    textFormatRuns: [
+                      {
+                        startIndex: 0,
+                        format: {
+                          foregroundColor: {
+                            red: 0,
+                            green: 0,
+                            blue: 0,
+                          },
+                        },
+                      },
+                      {
+                        startIndex: statusStart,
+                        format: {
+                          foregroundColor:
+                            args.mode === "full_protected"
+                              ? { red: 0.8, green: 0.1, blue: 0.1 }
+                              : { red: 0.1, green: 0.55, blue: 0.2 },
+                        },
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+            fields:
+              "userEnteredValue,userEnteredFormat.textFormat.bold,userEnteredFormat.textFormat.foregroundColor,textFormatRuns",
+          },
+        },
+      ],
+    },
+  });
+}
+
 
 function columnNumberToName(columnNumber: number) {
   let num = columnNumber;

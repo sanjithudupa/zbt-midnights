@@ -95,6 +95,14 @@ type CleanupSummaryRow = {
   deleted_photos: number;
 };
 
+type SheetWeekRow = {
+  sheet_name: string;
+  start_date: string;
+  protection_mode: "none" | "full_protected" | "signup_open";
+  has_week_record: boolean;
+  week_id: string | null;
+};
+
 const selectionKey = (day: number, jobId: string) => `${day}:${jobId}`;
 
 const IconEdit = () => (
@@ -276,9 +284,9 @@ function JobDayGrid({
 
 export default function AdminDashboard() {
   const router = useRouter();
-  const [tab, setTab] = useState<"overview" | "jobs" | "users" | "settings">(
-    "overview"
-  );
+  const [tab, setTab] = useState<
+    "overview" | "week-setup" | "jobs" | "users" | "settings"
+  >("overview");
   const [users, setUsers] = useState<User[]>([]);
   const [jobDefinitions, setJobDefinitions] = useState<
     (JobDefinition & { job_requirements?: JobRequirement[] })[]
@@ -322,16 +330,23 @@ export default function AdminDashboard() {
   const [createTemplateSelections, setCreateTemplateSelections] = useState<SelectionMap>({});
   const [cleanupSummary, setCleanupSummary] = useState<CleanupSummaryRow[]>([]);
   const [cleanupStatus, setCleanupStatus] = useState<string | null>(null);
+  const [weekSetupStatus, setWeekSetupStatus] = useState<string | null>(null);
+  const [weekSetupLoading, setWeekSetupLoading] = useState(false);
+  const [sheetWeeks, setSheetWeeks] = useState<SheetWeekRow[]>([]);
+  const [selectedSetupStartDate, setSelectedSetupStartDate] = useState("");
   const [settingsStatus, setSettingsStatus] = useState<string | null>(null);
   const [settingsInitial, setSettingsInitial] = useState<{
     scheduleSource: "database" | "google sheet";
+    alwaysAllowedGmails: string;
   }>({
     scheduleSource: "google sheet",
+    alwaysAllowedGmails: "",
   });
   const [settingsDraft, setSettingsDraft] = useState({
     adminPassword: "",
     imgbbApiKey: "",
     sheetsUrl: "",
+    alwaysAllowedGmails: "",
     scheduleSource: "google sheet" as "database" | "google sheet",
   });
   const [settingsPromptOpen, setSettingsPromptOpen] = useState(false);
@@ -344,6 +359,9 @@ export default function AdminDashboard() {
     if (settingsDraft.adminPassword.trim()) count += 1;
     if (settingsDraft.imgbbApiKey.trim()) count += 1;
     if (settingsDraft.sheetsUrl.trim()) count += 1;
+    if (settingsDraft.alwaysAllowedGmails !== settingsInitial.alwaysAllowedGmails) {
+      count += 1;
+    }
     if (settingsDraft.scheduleSource !== settingsInitial.scheduleSource) {
       count += 1;
     }
@@ -374,6 +392,9 @@ export default function AdminDashboard() {
   const [requirementInput, setRequirementInput] = useState("");
 
   const selectedWeek = weeks.find((week) => week.id === selectedWeekId);
+  const selectedSetupWeek = sheetWeeks.find(
+    (week) => week.start_date === selectedSetupStartDate
+  );
 
   const sheetDerived = useMemo(() => {
     if (!isSheetMode || !sheetWeekData) return null;
@@ -469,6 +490,7 @@ export default function AdminDashboard() {
         loadUsers(),
         loadJobDefinitions(),
         loadWeeks(),
+        loadSheetWeeks(),
         loadTemplates(),
         loadSettingsFlags(),
       ]);
@@ -592,6 +614,25 @@ export default function AdminDashboard() {
     }
   };
 
+  const loadSheetWeeks = async () => {
+    const response = await trackedFetch("/api/admin/sheets/weeks");
+    if (!response.ok) return;
+    const data = await response.json();
+    const list: SheetWeekRow[] = data.sheetWeeks ?? [];
+    setSheetWeeks(list);
+    if (list.length > 0) {
+      const mondayString = formatDateInput(getMonday(new Date()));
+      const currentWeek = list.find((week) => week.start_date === mondayString);
+      if (currentWeek) {
+        setSelectedSetupStartDate(currentWeek.start_date);
+        return;
+      }
+    }
+    if (!selectedSetupStartDate && list.length > 0) {
+      setSelectedSetupStartDate(list[0].start_date);
+    }
+  };
+
   const loadWeekStatus = async (weekId: string) => {
     setStatusLoading(true);
     const response = await trackedFetch(`/api/admin/weeks/${weekId}/status`);
@@ -605,10 +646,25 @@ export default function AdminDashboard() {
   };
 
   const loadSettingsFlags = async () => {
-    setSettingsInitial({ scheduleSource: "google sheet" });
+    const response = await trackedFetch("/api/admin/settings");
+    if (!response.ok) return;
+    const data = await response.json();
+    const scheduleSource =
+      data.settings?.scheduleSourceOfTruth === "database"
+        ? "database"
+        : "google sheet";
+    const alwaysAllowedGmails =
+      typeof data.settings?.alwaysAllowedGmails === "string"
+        ? data.settings.alwaysAllowedGmails
+        : "";
+    setSettingsInitial({
+      scheduleSource,
+      alwaysAllowedGmails,
+    });
     setSettingsDraft((prev) => ({
       ...prev,
-      scheduleSource: "google sheet",
+      scheduleSource,
+      alwaysAllowedGmails,
     }));
   };
 
@@ -1196,6 +1252,7 @@ export default function AdminDashboard() {
         adminPassword: settingsDraft.adminPassword.trim() || undefined,
         imgbbApiKey: settingsDraft.imgbbApiKey.trim() || undefined,
         sheetsUrl: settingsDraft.sheetsUrl.trim() || undefined,
+        alwaysAllowedGmails: settingsDraft.alwaysAllowedGmails,
         scheduleSourceOfTruth:
           settingsDraft.scheduleSource !== settingsInitial.scheduleSource
             ? settingsDraft.scheduleSource
@@ -1208,16 +1265,75 @@ export default function AdminDashboard() {
       return;
     }
     setSettingsStatus("Settings updated.");
-    setSettingsInitial({ scheduleSource: settingsDraft.scheduleSource });
+    setSettingsInitial({
+      scheduleSource: settingsDraft.scheduleSource,
+      alwaysAllowedGmails: settingsDraft.alwaysAllowedGmails,
+    });
     setSettingsDraft((prev) => ({
       adminPassword: "",
       imgbbApiKey: "",
       sheetsUrl: "",
+      alwaysAllowedGmails: prev.alwaysAllowedGmails,
       scheduleSource: prev.scheduleSource,
     }));
     setSettingsMasterPassword("");
     setSettingsPromptOpen(false);
     loadSettingsFlags();
+  };
+
+  const handleSetSheetProtection = async (mode: "full_protected" | "signup_open") => {
+    if (!selectedSetupStartDate) {
+      setWeekSetupStatus("Select a week first.");
+      return;
+    }
+    setWeekSetupLoading(true);
+    setWeekSetupStatus(null);
+    const response = await trackedFetch("/api/admin/sheets/protection", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        start_date: selectedSetupStartDate,
+        mode,
+      }),
+    });
+    setWeekSetupLoading(false);
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      setWeekSetupStatus(data.error ?? "Failed to update protection.");
+      return;
+    }
+    setWeekSetupStatus(
+      `Updated ${data.sheetName} to ${mode} (${data.jobCount} jobs).`
+    );
+    await loadSheetWeeks();
+  };
+
+  const handleCreateWeekFromSheet = async () => {
+    if (!selectedSetupStartDate) {
+      setWeekSetupStatus("Select a week first.");
+      return;
+    }
+    setWeekSetupLoading(true);
+    setWeekSetupStatus(null);
+    const response = await trackedFetch("/api/admin/weeks/from-sheet", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        start_date: selectedSetupStartDate,
+      }),
+    });
+    setWeekSetupLoading(false);
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      setWeekSetupStatus(data.error ?? "Failed to create week record.");
+      return;
+    }
+    setWeekSetupStatus(
+      data.created
+        ? `Created week record for ${selectedSetupStartDate}.`
+        : `Week record already exists for ${selectedSetupStartDate}.`
+    );
+    await Promise.all([loadWeeks(), loadSheetWeeks()]);
   };
 
   const handleOpenDetail = (
@@ -1327,6 +1443,12 @@ export default function AdminDashboard() {
           onClick={() => setTab("overview")}
         >
           Week Overview
+        </button>
+        <button
+          className={tab === "week-setup" ? "tab active" : "tab"}
+          onClick={() => setTab("week-setup")}
+        >
+          Week Setup
         </button>
         <button
           className={tab === "jobs" ? "tab active" : "tab"}
@@ -1455,9 +1577,12 @@ export default function AdminDashboard() {
                 const sheetState =
                   sheetDerived.states.get(selectionKey(dayIndex, jobId)) ?? "";
                 const normalizedState = sheetState.trim().toUpperCase();
+                const isTriplePunt = normalizedState === "P";
                 const isVerified = normalizedState === "V";
                 const statusClass = isVerified
                   ? "complete"
+                  : isTriplePunt
+                    ? "punted"
                   : effectiveComplete
                     ? "complete-admin"
                     : isOn
@@ -1478,13 +1603,20 @@ export default function AdminDashboard() {
                       ? `assigned: ${assignedName}`
                       : ""
                   : "";
-                const text = effectiveComplete ? effectiveLabel : assignedLabel;
+                const text = isTriplePunt
+                  ? assignedName
+                    ? `3x punt: ${assignedName}`
+                    : "3x punt"
+                  : effectiveComplete
+                    ? effectiveLabel
+                    : assignedLabel;
                 const puntName = statusMap
                   .get(selectionKey(dayIndex, jobId))
                   ?.flatMap((row) => row.job_punts ?? [])
                   .map((punt) => punt.users?.username)
                   .find(Boolean);
-                const actionable = isOn && !isComplete && !isMissingJob;
+                const actionable =
+                  isOn && !isComplete && !isMissingJob && !isTriplePunt;
 
                 return (
                   <button
@@ -1525,6 +1657,75 @@ export default function AdminDashboard() {
               }}
             />
           ) : null}
+        </section>
+      )}
+
+      {tab === "week-setup" && (
+        <section className="card">
+          <h2>Week Setup</h2>
+          <div className="stack">
+            <label className="field">
+              <span>Select week</span>
+              <select
+                className="flat-select"
+                value={selectedSetupStartDate}
+                onChange={(event) => setSelectedSetupStartDate(event.target.value)}
+              >
+                <option value="">Select week</option>
+                {sheetWeeks.map((week) => (
+                  <option key={week.start_date} value={week.start_date}>
+                    {week.start_date} ({week.sheet_name})
+                  </option>
+                ))}
+              </select>
+            </label>
+            {selectedSetupWeek && (
+              <div className="stack">
+                <div className="muted">
+                  Current protection mode:{" "}
+                  <strong>{selectedSetupWeek.protection_mode}</strong>
+                </div>
+                <div className="muted">
+                  Database week record:{" "}
+                  <strong>
+                    {selectedSetupWeek.has_week_record ? "exists" : "missing"}
+                  </strong>
+                </div>
+              </div>
+            )}
+            {weekSetupStatus && <div className="muted">{weekSetupStatus}</div>}
+            <div className="row">
+              <button
+                className="primary"
+                disabled={!selectedSetupStartDate || weekSetupLoading || isBusy}
+                onClick={() => void handleSetSheetProtection("full_protected")}
+              >
+                {weekSetupLoading ? "Updating..." : "Protect Entire Sheet"}
+              </button>
+              <button
+                className="ghost"
+                disabled={!selectedSetupStartDate || weekSetupLoading || isBusy}
+                onClick={() => void handleSetSheetProtection("signup_open")}
+              >
+                {weekSetupLoading ? "Updating..." : "Open Signup Cells Only"}
+              </button>
+              <button
+                className="ghost"
+                disabled={
+                  !selectedSetupStartDate ||
+                  weekSetupLoading ||
+                  isBusy ||
+                  Boolean(selectedSetupWeek?.has_week_record)
+                }
+                onClick={() => void handleCreateWeekFromSheet()}
+              >
+                {weekSetupLoading ? "Working..." : "Create Week Record"}
+              </button>
+            </div>
+            <div className="muted">
+              Signup mode opens columns C/E/G/I/K/M/O for job rows only.
+            </div>
+          </div>
         </section>
       )}
 
@@ -1715,6 +1916,21 @@ export default function AdminDashboard() {
                   setSettingsDraft((prev) => ({
                     ...prev,
                     sheetsUrl: event.target.value,
+                  }))
+                }
+              />
+            </label>
+            <label className="field">
+              <span>Always Allowed Gmails</span>
+              <textarea
+                className="input-grow"
+                rows={4}
+                placeholder="one email per line"
+                value={settingsDraft.alwaysAllowedGmails}
+                onChange={(event) =>
+                  setSettingsDraft((prev) => ({
+                    ...prev,
+                    alwaysAllowedGmails: event.target.value,
                   }))
                 }
               />
