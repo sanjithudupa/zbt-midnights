@@ -183,11 +183,7 @@ export async function applySheetProtectionMode(args: {
 
   let deletedProtectionCount = 0;
   for (const protection of meta.protectedRanges) {
-    const description = protection.description ?? "";
-    if (
-      description.startsWith(PROTECTION_DESCRIPTION_PREFIX) &&
-      protection.protectedRangeId
-    ) {
+    if (protection.protectedRangeId) {
       deletedProtectionCount += 1;
       requests.push({
         deleteProtectedRange: {
@@ -317,42 +313,6 @@ export async function writeSheetProtectionStatusCell(args: {
   });
 }
 
-export async function getSheetProtectionMode(
-  spreadsheetId: string,
-  sheetName: string
-) {
-  const meta = await getSheetMeta(spreadsheetId, sheetName);
-  const matching = meta.protectedRanges.find((protection) =>
-    (protection.description ?? "").startsWith(
-      `${PROTECTION_DESCRIPTION_PREFIX}${sheetName}`
-    )
-  );
-  if (!matching) {
-    return "none" as const;
-  }
-
-  const ranges = matching.unprotectedRanges ?? [];
-  if (ranges.length === 0) {
-    return "full_protected" as const;
-  }
-
-  const signature = new Set(
-    ranges.map(
-      (range) =>
-        `${range.startColumnIndex ?? -1}:${range.endColumnIndex ?? -1}:${
-          range.startRowIndex ?? -1
-        }:${range.endRowIndex ?? -1}`
-    )
-  );
-  const expectedColumns = [2, 4, 6, 8, 10, 12, 14];
-  const isSignupShape =
-    signature.size === expectedColumns.length &&
-    expectedColumns.every((column) =>
-      Array.from(signature).some((key) => key.startsWith(`${column}:${column + 1}:2:`))
-    );
-
-  return isSignupShape ? ("signup_open" as const) : ("full_protected" as const);
-}
 
 function columnNumberToName(columnNumber: number) {
   let num = columnNumber;

@@ -1,7 +1,6 @@
 import { getAdminSetting } from "./adminSettings";
 import {
   applySheetProtectionMode,
-  getSheetProtectionMode,
   getSheetValues,
   getSpreadsheetId,
   listSheetNames,
@@ -65,6 +64,18 @@ function inferStartDateFromSheetName(name: string, now = new Date()) {
   const mm = String(picked.getMonth() + 1).padStart(2, "0");
   const dd = String(picked.getDate()).padStart(2, "0");
   return `${year}-${mm}-${dd}`;
+}
+
+function getProtectionModeFromStatusCell(values: string[][]) {
+  for (const row of values) {
+    const first = String(row?.[0] ?? "").trim();
+    if (!first.startsWith("Status:")) continue;
+    const status = first.slice("Status:".length).trim().toUpperCase();
+    if (status === "LOCKED") return "full_protected" as const;
+    if (status === "SIGNUPS OPEN") return "signup_open" as const;
+    return "none" as const;
+  }
+  return "none" as const;
 }
 
 async function getCachedSheetNames(spreadsheetId: string) {
@@ -291,7 +302,8 @@ export async function listSheetWeeks(): Promise<
   for (const sheetName of names) {
     const startDate = inferStartDateFromSheetName(sheetName, now);
     if (!startDate) continue;
-    const protectionMode = await getSheetProtectionMode(spreadsheetId, sheetName);
+    const values = await getSheetValues(spreadsheetId, sheetName);
+    const protectionMode = getProtectionModeFromStatusCell(values);
     rows.push({
       sheetName,
       startDate,
