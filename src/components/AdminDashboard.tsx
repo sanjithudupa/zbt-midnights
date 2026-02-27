@@ -1577,9 +1577,12 @@ export default function AdminDashboard() {
                 const sheetState =
                   sheetDerived.states.get(selectionKey(dayIndex, jobId)) ?? "";
                 const normalizedState = sheetState.trim().toUpperCase();
+                const isTriplePunt = normalizedState === "P";
                 const isVerified = normalizedState === "V";
                 const statusClass = isVerified
                   ? "complete"
+                  : isTriplePunt
+                    ? "punted"
                   : effectiveComplete
                     ? "complete-admin"
                     : isOn
@@ -1600,13 +1603,20 @@ export default function AdminDashboard() {
                       ? `assigned: ${assignedName}`
                       : ""
                   : "";
-                const text = effectiveComplete ? effectiveLabel : assignedLabel;
+                const text = isTriplePunt
+                  ? assignedName
+                    ? `3x punt: ${assignedName}`
+                    : "3x punt"
+                  : effectiveComplete
+                    ? effectiveLabel
+                    : assignedLabel;
                 const puntName = statusMap
                   .get(selectionKey(dayIndex, jobId))
                   ?.flatMap((row) => row.job_punts ?? [])
                   .map((punt) => punt.users?.username)
                   .find(Boolean);
-                const actionable = isOn && !isComplete && !isMissingJob;
+                const actionable =
+                  isOn && !isComplete && !isMissingJob && !isTriplePunt;
 
                 return (
                   <button

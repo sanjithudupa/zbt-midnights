@@ -438,6 +438,12 @@ button.link {
   font-weight: 600;
 }
 
+.status-box.punted {
+  background: #7f1d1d;
+  color: #ffffff;
+  font-weight: 600;
+}
+
 .status-box.late {
   background: #facc15;
   color: #111111;
